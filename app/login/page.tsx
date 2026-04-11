@@ -247,22 +247,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Demo credentials */}
-        <div
-          style={{
-            marginTop: "16px",
-            padding: "14px",
-            background: "rgba(79, 110, 247, 0.05)",
-            border: "1px solid rgba(79, 110, 247, 0.15)",
-            borderRadius: "10px",
-            fontSize: "12px",
-            color: "var(--text2)",
-          }}
-        >
-          <p style={{ margin: "0 0 6px", fontWeight: "600", color: "var(--text)" }}>Demo credentials:</p>
-          <p style={{ margin: "0 0 2px" }}>Admin: admin@growthOS.com / admin123</p>
-          <p style={{ margin: 0 }}>Client: client@pinkrose.com / client123</p>
-        </div>
       </div>
 
       <style>{`
