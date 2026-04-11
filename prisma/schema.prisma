@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(CLIENT)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Client {
+  id                String       @id @default(cuid())
+  name              String
+  shopifyDomain     String?
+  shopifyToken      String?
+  metaAccountId     String?
+  metaAccessToken   String?
+  tiktokAccountId   String?
+  tiktokAccessToken String?
+  reportFrequency   String       @default("DAILY_WEEKLY_MONTHLY")
+  status            ClientStatus @default(ACTIVE)
+  users             User[]
+  products          Product[]
+  adAccounts        AdAccount[]
+  alerts            Alert[]
+  createdAt         DateTime     @default(now())
+}
+
+model AdAccount {
+  id        String     @id @default(cuid())
+  clientId  String
+  client    Client     @relation(fields: [clientId], references: [id])
+  platform  Platform
+  accountId String
+  creatives Creative[]
+}
+
+model Creative {
+  id           String    @id @default(cuid())
+  adAccountId  String
+  adAccount    AdAccount @relation(fields: [adAccountId], references: [id])
+  name         String
+  campaignName String?
+  thumbnailUrl String?
+  platform     Platform
+  spend        Float     @default(0)
+  revenue      Float     @default(0)
+  roas         Float     @default(0)
+  purchases    Int       @default(0)
+  ctr          Float     @default(0)
+  cpa          Float     @default(0)
+  impressions  Int       @default(0)
+  roi          Float     @default(0)
+  date         DateTime  @default(now())
+}
+
+model Product {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id])
+  shopifyId String
+  name      String
+  totalSold Int       @default(0)
+  revenue   Float     @default(0)
+  variants  Variant[]
+}
+
+model Variant {
+  id           String  @id @default(cuid())
+  productId    String
+  product      Product @relation(fields: [productId], references: [id])
+  shopifyId    String
+  size         String?
+  color        String?
+  sold         Int     @default(0)
+  stockLeft    Int     @default(0)
+  initialStock Int     @default(0)
+  revenue      Float   @default(0)
+}
+
+model Alert {
+  id          String    @id @default(cuid())
+  clientId    String
+  client      Client    @relation(fields: [clientId], references: [id])
+  type        AlertType
+  productName String
+  variantInfo String
+  message     String
+  read        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+}
+
+enum Role {
+  ADMIN
+  CLIENT
+}
+
+enum Platform {
+  META
+  TIKTOK
+}
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  INACTIVE
+}
+
+enum AlertType {
+  SELLTHROUGH_70
+  SELLTHROUGH_50
+  SELLTHROUGH_25
+  OUT_OF_STOCK
+}
