@@ -56,26 +56,20 @@ function PlatformBadge({ platform }: { platform: string }) {
 }
 
 function ShopifyConnectButton({
-  clientId,
   domain,
   connected,
+  onEdit,
 }: {
-  clientId: string;
   domain: string | null;
   connected: boolean;
+  onEdit: () => void;
 }) {
-  const [showInput, setShowInput] = useState(false);
-  const [shopDomain, setShopDomain] = useState(domain || "");
-
   if (connected && domain) {
     return (
-      <a
-        href={`/api/shopify/auth?shop=${domain}&clientId=${clientId}`}
-        title="Reconnect Shopify"
+      <span
         style={{
           fontSize: "11px",
           color: "var(--green)",
-          textDecoration: "none",
           display: "flex",
           alignItems: "center",
           gap: "4px",
@@ -92,73 +86,13 @@ function ShopifyConnectButton({
           }}
         />
         {domain.replace(".myshopify.com", "")}
-      </a>
-    );
-  }
-
-  if (showInput) {
-    return (
-      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-        <input
-          autoFocus
-          value={shopDomain}
-          onChange={(e) => setShopDomain(e.target.value)}
-          placeholder="store.myshopify.com"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setShowInput(false);
-            if (e.key === "Enter" && shopDomain) {
-              window.location.href = `/api/shopify/auth?shop=${encodeURIComponent(shopDomain)}&clientId=${clientId}`;
-            }
-          }}
-          style={{
-            padding: "4px 8px",
-            fontSize: "11px",
-            width: "150px",
-            borderRadius: "4px",
-          }}
-        />
-        <a
-          href={
-            shopDomain
-              ? `/api/shopify/auth?shop=${encodeURIComponent(shopDomain)}&clientId=${clientId}`
-              : undefined
-          }
-          style={{
-            padding: "4px 8px",
-            fontSize: "11px",
-            background: shopDomain ? "rgba(34,197,94,0.12)" : "var(--surface3)",
-            border: `1px solid ${shopDomain ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
-            borderRadius: "4px",
-            color: shopDomain ? "var(--green)" : "var(--text3)",
-            textDecoration: "none",
-            cursor: shopDomain ? "pointer" : "default",
-            fontFamily: "DM Sans, sans-serif",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Go
-        </a>
-        <button
-          onClick={() => setShowInput(false)}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text3)",
-            cursor: "pointer",
-            fontSize: "11px",
-            padding: "4px",
-            fontFamily: "DM Sans, sans-serif",
-          }}
-        >
-          ✕
-        </button>
-      </div>
+      </span>
     );
   }
 
   return (
     <button
-      onClick={() => setShowInput(true)}
+      onClick={onEdit}
       style={{
         background: "transparent",
         border: "1px dashed var(--border)",
@@ -275,9 +209,9 @@ export default function ClientsTable({
               </div>
 
               <ShopifyConnectButton
-                clientId={client.id}
                 domain={client.shopifyDomain}
                 connected={!!client.shopifyToken && !!client.shopifyDomain}
+                onEdit={() => onEdit(client)}
               />
 
               <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>

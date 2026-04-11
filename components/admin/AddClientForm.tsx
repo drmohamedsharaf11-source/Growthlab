@@ -72,6 +72,7 @@ export default function AddClientForm({
   const [formData, setFormData] = useState({
     name: editClient?.name || "",
     shopifyDomain: editClient?.shopifyDomain || "",
+    shopifyToken: "",
     metaAccountId: editClient?.metaAccountId || "",
     metaAccessToken: editClient?.metaAccessToken || "",
     tiktokAccountId: editClient?.tiktokAccountId || "",
@@ -84,10 +85,12 @@ export default function AddClientForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-  // savedClientId is set after a new client is created — used to initiate OAuth
   const [savedClientId, setSavedClientId] = useState<string | null>(
     editClient?.id || null
   );
+  const [shopifyTestStatus, setShopifyTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [shopifyTestMsg, setShopifyTestMsg] = useState("");
+  const [editingShopify, setEditingShopify] = useState(!editClient?.shopifyToken);
 
   const set = (key: string) => (val: string) =>
     setFormData((prev) => ({ ...prev, [key]: val }));
@@ -108,7 +111,8 @@ export default function AddClientForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
-          shopifyToken: undefined,
+          // Only send shopifyToken if the user has entered one
+          shopifyToken: formData.shopifyToken || undefined,
         }),
       });
 
@@ -126,6 +130,7 @@ export default function AddClientForm({
         setFormData({
           name: "",
           shopifyDomain: "",
+          shopifyToken: "",
           metaAccountId: "",
           metaAccessToken: "",
           tiktokAccountId: "",
@@ -134,6 +139,8 @@ export default function AddClientForm({
           clientEmail: "",
           clientName: "",
         });
+        setShopifyTestStatus("idle");
+        setShopifyTestMsg("");
         setTimeout(() => setSuccess(false), 3000);
       }
     } catch (err) {
@@ -236,8 +243,8 @@ export default function AddClientForm({
           Shopify Integration
         </p>
 
-        {/* Already connected */}
-        {editClient?.shopifyToken && editClient?.shopifyDomain ? (
+        {/* Already connected + not editing */}
+        {editClient?.shopifyToken && editClient?.shopifyDomain && !editingShopify ? (
           <div
             style={{
               display: "flex",
@@ -250,104 +257,127 @@ export default function AddClientForm({
               marginBottom: "8px",
             }}
           >
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                background: "var(--green)",
+                flexShrink: 0,
+              }}
+            />
             <span style={{ color: "var(--green)", fontSize: "13px", fontWeight: "600" }}>
-              ✓ Connected
+              Connected
             </span>
             <span style={{ fontSize: "13px", color: "var(--text2)" }}>
               {editClient.shopifyDomain}
             </span>
-            <a
-              href={`/api/shopify/auth?shop=${editClient.shopifyDomain}&clientId=${editClient.id}`}
+            <button
+              type="button"
+              onClick={() => setEditingShopify(true)}
               style={{
                 marginLeft: "auto",
+                background: "transparent",
+                border: "none",
                 fontSize: "12px",
                 color: "var(--text3)",
                 textDecoration: "underline",
                 cursor: "pointer",
+                fontFamily: "DM Sans, sans-serif",
               }}
             >
-              Reconnect
-            </a>
+              Change credentials
+            </button>
           </div>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto",
-              gap: "10px",
-              alignItems: "flex-end",
-              marginBottom: "8px",
-            }}
-          >
-            <FormField
-              label="Shopify Store Domain"
-              name="shopifyDomain"
-              value={formData.shopifyDomain}
-              onChange={set("shopifyDomain")}
-              placeholder="storename.myshopify.com"
-            />
-            <a
-              href={
-                savedClientId && formData.shopifyDomain
-                  ? `/api/shopify/auth?shop=${encodeURIComponent(formData.shopifyDomain)}&clientId=${savedClientId}`
-                  : undefined
-              }
-              onClick={
-                !savedClientId
-                  ? (e) => {
-                      e.preventDefault();
-                      setError("Save the client first, then connect Shopify.");
-                    }
-                  : !formData.shopifyDomain
-                  ? (e) => {
-                      e.preventDefault();
-                      setError("Enter a Shopify store domain first.");
-                    }
-                  : undefined
-              }
+          <div style={{ marginBottom: "8px" }}>
+            <div
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "9px 16px",
-                background:
-                  savedClientId && formData.shopifyDomain
-                    ? "rgba(34,197,94,0.12)"
-                    : "var(--surface3)",
-                border: `1px solid ${
-                  savedClientId && formData.shopifyDomain
-                    ? "rgba(34,197,94,0.35)"
-                    : "var(--border)"
-                }`,
-                borderRadius: "8px",
-                color:
-                  savedClientId && formData.shopifyDomain
-                    ? "var(--green)"
-                    : "var(--text3)",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor:
-                  savedClientId && formData.shopifyDomain
-                    ? "pointer"
-                    : "not-allowed",
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-                fontFamily: "DM Sans, sans-serif",
-                marginBottom: "1px",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "10px",
+                marginBottom: "10px",
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-              Connect Shopify
-            </a>
+              <FormField
+                label="Store Domain"
+                name="shopifyDomain"
+                value={formData.shopifyDomain}
+                onChange={(val) => {
+                  set("shopifyDomain")(val);
+                  setShopifyTestStatus("idle");
+                }}
+                placeholder="storename.myshopify.com"
+              />
+              <FormField
+                label="Access Token"
+                name="shopifyToken"
+                value={formData.shopifyToken}
+                onChange={(val) => {
+                  set("shopifyToken")(val);
+                  setShopifyTestStatus("idle");
+                }}
+                type="password"
+                placeholder="shpat_xxxxxxxxxxxx"
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <button
+                type="button"
+                disabled={shopifyTestStatus === "testing" || !formData.shopifyDomain || !formData.shopifyToken}
+                onClick={async () => {
+                  setShopifyTestStatus("testing");
+                  setShopifyTestMsg("");
+                  try {
+                    const res = await fetch("/api/shopify/test", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        domain: formData.shopifyDomain,
+                        token: formData.shopifyToken,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                      setShopifyTestStatus("ok");
+                      setShopifyTestMsg(data.shopName ? `Connected to "${data.shopName}"` : "Connection successful");
+                    } else {
+                      setShopifyTestStatus("error");
+                      setShopifyTestMsg(data.error || "Connection failed");
+                    }
+                  } catch {
+                    setShopifyTestStatus("error");
+                    setShopifyTestMsg("Network error");
+                  }
+                }}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  background: "var(--surface3)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  color: "var(--text2)",
+                  cursor: (!formData.shopifyDomain || !formData.shopifyToken) ? "not-allowed" : "pointer",
+                  opacity: (!formData.shopifyDomain || !formData.shopifyToken) ? 0.5 : 1,
+                  fontFamily: "DM Sans, sans-serif",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {shopifyTestStatus === "testing" ? "Testing…" : "Test Connection"}
+              </button>
+              {shopifyTestStatus === "ok" && (
+                <span style={{ fontSize: "13px", color: "var(--green)", fontWeight: "600" }}>
+                  ✓ {shopifyTestMsg}
+                </span>
+              )}
+              {shopifyTestStatus === "error" && (
+                <span style={{ fontSize: "13px", color: "var(--red)" }}>
+                  ✕ {shopifyTestMsg}
+                </span>
+              )}
+            </div>
           </div>
-        )}
-
-        {!savedClientId && (
-          <p style={{ margin: "0 0 8px", fontSize: "12px", color: "var(--text3)" }}>
-            Save the client first to enable Shopify OAuth connection.
-          </p>
         )}
 
         {/* Meta */}
