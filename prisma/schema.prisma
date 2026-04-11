@@ -126,3 +126,11 @@ enum AlertType {
   SELLTHROUGH_25
   OUT_OF_STOCK
 }
+
+model ShopifyOAuthState {
+  id        String   @id @default(cuid())
+  state     String   @unique
+  clientId  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

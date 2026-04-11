@@ -54,17 +54,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${adminUrl}?shopify=error&msg=invalid_hmac`);
   }
 
-  // Validate CSRF state against cookie
-  const cookieState = request.cookies.get("shopify_oauth_state")?.value;
-  if (!cookieState || cookieState !== state) {
+  // Validate state against database (replaces cookie-based CSRF check)
+  const storedState = await prisma.shopifyOAuthState.findUnique({
+    where: { state },
+  });
+
+  if (!storedState) {
+    console.error("Shopify OAuth state not found in DB:", state);
     return NextResponse.redirect(`${adminUrl}?shopify=error&msg=invalid_state`);
   }
 
-  // Extract clientId from state (format: "clientId:nonce")
-  const clientId = state.split(":")[0];
-  if (!clientId) {
-    return NextResponse.redirect(`${adminUrl}?shopify=error&msg=invalid_state`);
+  if (storedState.expiresAt < new Date()) {
+    await prisma.shopifyOAuthState.delete({ where: { state } });
+    return NextResponse.redirect(`${adminUrl}?shopify=error&msg=state_expired`);
   }
+
+  const clientId = storedState.clientId;
+
+  // Consume the state immediately to prevent replay attacks
+  await prisma.shopifyOAuthState.delete({ where: { state } });
 
   // Exchange authorization code for permanent access token
   try {
@@ -106,12 +114,9 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Clear state cookie and redirect with success
-    const response = NextResponse.redirect(
+    return NextResponse.redirect(
       `${adminUrl}?shopify=connected&shop=${encodeURIComponent(shop)}`
     );
-    response.cookies.delete("shopify_oauth_state");
-    return response;
   } catch (error) {
     console.error("Shopify OAuth callback error:", error);
     return NextResponse.redirect(`${adminUrl}?shopify=error&msg=server_error`);

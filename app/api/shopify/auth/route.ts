@@ -39,9 +39,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
 
-  // Generate CSRF state: clientId:nonce
+  // Generate CSRF state and persist it in the database (10-minute TTL)
   const nonce = crypto.randomBytes(16).toString("hex");
   const state = `${clientId}:${nonce}`;
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  // Clean up any expired states first
+  await prisma.shopifyOAuthState.deleteMany({
+    where: { expiresAt: { lt: new Date() } },
+  });
+
+  await prisma.shopifyOAuthState.create({
+    data: { state, clientId, expiresAt },
+  });
 
   const redirectUri = `${process.env.NEXTAUTH_URL}/api/shopify/callback`;
 
@@ -52,16 +62,5 @@ export async function GET(request: NextRequest) {
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${state}`;
 
-  const response = NextResponse.redirect(installUrl);
-
-  // Store state in a short-lived cookie for CSRF validation on callback
-  response.cookies.set("shopify_oauth_state", state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 600, // 10 minutes
-    path: "/",
-  });
-
-  return response;
+  return NextResponse.redirect(installUrl);
 }
