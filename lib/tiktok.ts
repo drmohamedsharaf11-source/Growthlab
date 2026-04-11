@@ -96,7 +96,6 @@ export async function getAdInsights(
   const data = await response.json();
   const list = data.data?.list || [];
   return list.map((item: { dimensions: { ad_id: string }; metrics: TikTokInsightData }) => ({
-    ad_id: item.dimensions?.ad_id,
     ...item.metrics,
   }));
 }
