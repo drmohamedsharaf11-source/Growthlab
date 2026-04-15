@@ -252,10 +252,7 @@ export default function ClientsTable({
               <ShopifyConnectButton
                 clientId={client.id}
                 domain={client.shopifyDomain}
-                connected={
-                  typeof client.shopifyToken === 'string' && client.shopifyToken !== '' &&
-                  typeof client.shopifyDomain === 'string' && client.shopifyDomain !== ''
-                }
+                connected={!!(client.shopifyToken && client.shopifyToken.length > 0 && client.shopifyDomain && client.shopifyDomain.length > 0)}
                 onEdit={() => onEdit(client)}
               />
 
