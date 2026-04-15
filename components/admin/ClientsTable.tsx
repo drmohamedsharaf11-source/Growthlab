@@ -66,29 +66,66 @@ function ShopifyConnectButton({
   connected: boolean;
   onEdit: () => void;
 }) {
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(clientId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopifyToken: null, shopifyDomain: null }),
+      });
+      window.location.reload();
+    } catch {
+      setDisconnecting(false);
+    }
+  }
+
   if (connected && domain) {
     return (
-      <span
-        style={{
-          fontSize: "11px",
-          color: "var(--green)",
-          display: "flex",
-          alignItems: "center",
-          gap: "4px",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
         <span
           style={{
-            width: "6px",
-            height: "6px",
-            borderRadius: "50%",
-            background: "var(--green)",
-            display: "inline-block",
-            flexShrink: 0,
+            fontSize: "11px",
+            color: "var(--green)",
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
           }}
-        />
-        {domain.replace(".myshopify.com", "")}
-      </span>
+        >
+          <span
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: "var(--green)",
+              display: "inline-block",
+              flexShrink: 0,
+            }}
+          />
+          {domain.replace(".myshopify.com", "")}
+        </span>
+        <button
+          onClick={handleDisconnect}
+          disabled={disconnecting}
+          title="Disconnect Shopify"
+          style={{
+            background: "transparent",
+            border: "1px solid rgba(239,68,68,0.35)",
+            borderRadius: "4px",
+            color: "var(--red)",
+            fontSize: "10px",
+            cursor: disconnecting ? "not-allowed" : "pointer",
+            padding: "2px 6px",
+            fontFamily: "DM Sans, sans-serif",
+            whiteSpace: "nowrap",
+            opacity: disconnecting ? 0.6 : 1,
+          }}
+        >
+          {disconnecting ? "…" : "Disconnect"}
+        </button>
+      </div>
     );
   }
 
@@ -215,7 +252,10 @@ export default function ClientsTable({
               <ShopifyConnectButton
                 clientId={client.id}
                 domain={client.shopifyDomain}
-                connected={!!client.shopifyToken && !!client.shopifyDomain}
+                connected={
+                  typeof client.shopifyToken === 'string' && client.shopifyToken !== '' &&
+                  typeof client.shopifyDomain === 'string' && client.shopifyDomain !== ''
+                }
                 onEdit={() => onEdit(client)}
               />
 

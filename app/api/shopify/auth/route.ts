@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const apiKey = process.env.SHOPIFY_CLIENT_ID;
   const baseUrl = process.env.NEXTAUTH_URL || "";
   const redirectUri = `${baseUrl}/api/shopify/callback`;
-  const scopes = "read_orders,read_products,read_inventory";
+  const scopes = "read_orders,read_products,read_inventory,read_customers,read_analytics";
 
   if (!apiKey) {
     return NextResponse.json(
