@@ -56,10 +56,12 @@ function PlatformBadge({ platform }: { platform: string }) {
 }
 
 function ShopifyConnectButton({
+  clientId,
   domain,
   connected,
   onEdit,
 }: {
+  clientId: string;
   domain: string | null;
   connected: boolean;
   onEdit: () => void;
@@ -91,8 +93,8 @@ function ShopifyConnectButton({
   }
 
   return (
-    <button
-      onClick={onEdit}
+    <a
+      href={`/api/shopify/auth?clientId=${encodeURIComponent(clientId)}`}
       style={{
         background: "transparent",
         border: "1px dashed var(--border)",
@@ -103,10 +105,12 @@ function ShopifyConnectButton({
         padding: "3px 8px",
         fontFamily: "DM Sans, sans-serif",
         whiteSpace: "nowrap",
+        textDecoration: "none",
+        display: "inline-block",
       }}
     >
       + Connect Shopify
-    </button>
+    </a>
   );
 }
 
@@ -209,6 +213,7 @@ export default function ClientsTable({
               </div>
 
               <ShopifyConnectButton
+                clientId={client.id}
                 domain={client.shopifyDomain}
                 connected={!!client.shopifyToken && !!client.shopifyDomain}
                 onEdit={() => onEdit(client)}
