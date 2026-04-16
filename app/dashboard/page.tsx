@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import Topbar from "@/components/layout/Topbar";
 import ClientSwitcher from "@/components/layout/ClientSwitcher";
 import KPICard from "@/components/dashboard/KPICard";
@@ -37,15 +36,7 @@ function formatPercent(val: number): string {
 
 export default function DashboardPage() {
   const { data: session } = useSession();
-  const router = useRouter();
   const { period, setPeriod } = usePeriod("WEEKLY");
-
-  // ADMIN users belong in /dashboard/admin
-  useEffect(() => {
-    if (session?.user?.role === "ADMIN") {
-      router.replace("/dashboard/admin");
-    }
-  }, [session?.user?.role, router]);
   const { client, clients, loading: clientLoading, setClient } = useClient(
     session?.user?.clientId
   );
