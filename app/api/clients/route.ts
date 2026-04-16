@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
+import { requireAuth, requireAdmin } from "@/lib/auth-helpers";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
+    const session = await requireAuth();
+
     if (session.user.role === Role.ADMIN) {
       const clients = await prisma.client.findMany({
         include: {
@@ -21,33 +18,31 @@ export async function GET() {
         orderBy: { createdAt: "desc" },
       });
       return NextResponse.json(clients);
-    } else {
-      // CLIENT role: only return their own client
-      if (!session.user.clientId) {
-        return NextResponse.json([]);
-      }
-      const client = await prisma.client.findUnique({
-        where: { id: session.user.clientId },
-        include: {
-          users: { select: { id: true, name: true, email: true, role: true, clientId: true, createdAt: true } },
-          adAccounts: true,
-        },
-      });
-      return NextResponse.json(client ? [client] : []);
     }
-  } catch (error) {
-    console.error("GET /api/clients error:", error);
+
+    // CLIENT — return only their own client
+    if (!session.user.clientId) {
+      return NextResponse.json([]);
+    }
+    const client = await prisma.client.findUnique({
+      where: { id: session.user.clientId },
+      include: {
+        users: { select: { id: true, name: true, email: true, role: true, clientId: true, createdAt: true } },
+        adAccounts: true,
+      },
+    });
+    return NextResponse.json(client ? [client] : []);
+  } catch (e) {
+    if (e instanceof Response) return e;
+    console.error("GET /api/clients error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user || session.user.role !== Role.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
   try {
+    await requireAdmin();
+
     const body = await request.json();
     const {
       name,
@@ -79,33 +74,20 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Create ad accounts if credentials provided
     if (metaAccountId && metaAccessToken) {
       await prisma.adAccount.create({
-        data: {
-          clientId: client.id,
-          platform: "META",
-          accountId: metaAccountId,
-        },
+        data: { clientId: client.id, platform: "META", accountId: metaAccountId },
       });
     }
 
     if (tiktokAccountId && tiktokAccessToken) {
       await prisma.adAccount.create({
-        data: {
-          clientId: client.id,
-          platform: "TIKTOK",
-          accountId: tiktokAccountId,
-        },
+        data: { clientId: client.id, platform: "TIKTOK", accountId: tiktokAccountId },
       });
     }
 
-    // Create client user if email provided
     if (clientEmail) {
-      const existingUser = await prisma.user.findUnique({
-        where: { email: clientEmail },
-      });
-
+      const existingUser = await prisma.user.findUnique({ where: { email: clientEmail } });
       if (!existingUser) {
         const password = await bcrypt.hash("changeme123", 12);
         await prisma.user.create({
@@ -126,8 +108,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(client, { status: 201 });
-  } catch (error) {
-    console.error("POST /api/clients error:", error);
+  } catch (e) {
+    if (e instanceof Response) return e;
+    console.error("POST /api/clients error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

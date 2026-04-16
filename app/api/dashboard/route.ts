@@ -1,36 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { getPeriodDateRange, getPreviousPeriodDateRange } from "@/lib/reports";
 import { Period } from "@/types";
 import { Role } from "@prisma/client";
+import { requireAuth, getClientScope } from "@/lib/auth-helpers";
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(request.url);
-  const period = (searchParams.get("period") || "WEEKLY") as Period;
-  const clientId = searchParams.get("clientId");
-
-  // Determine which client to fetch
-  let targetClientId: string | null = null;
-  if (session.user.role === Role.ADMIN) {
-    targetClientId = clientId;
-  } else {
-    targetClientId = session.user.clientId;
-  }
-
-  if (!targetClientId) {
-    return NextResponse.json({ error: "No client selected" }, { status: 400 });
-  }
-
-  const dateRange = getPeriodDateRange(period);
-  const prevDateRange = getPreviousPeriodDateRange(period);
-
   try {
+    const session = await requireAuth();
+
+    const { searchParams } = new URL(request.url);
+    const period = (searchParams.get("period") || "WEEKLY") as Period;
+    const requestedClientId = searchParams.get("clientId");
+
+    // Determine the target client, scoped to the session user
+    const scope = getClientScope(session);
+    if (scope === null) {
+      return NextResponse.json({ error: "No client associated with this account" }, { status: 403 });
+    }
+
+    let targetClientId: string | null;
+    if (session.user.role === Role.ADMIN) {
+      // ADMIN can query any client
+      targetClientId = requestedClientId;
+    } else {
+      // CLIENT can only see their own data — ignore the clientId param
+      targetClientId = session.user.clientId;
+    }
+
+    if (!targetClientId) {
+      return NextResponse.json({ error: "No client selected" }, { status: 400 });
+    }
+
+    const dateRange = getPeriodDateRange(period);
+    const prevDateRange = getPreviousPeriodDateRange(period);
+
     const [currentCreatives, prevCreatives, products, alerts] = await Promise.all([
       prisma.creative.findMany({
         where: {
@@ -57,7 +61,6 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    // KPI calculations
     const totalRevenue = currentCreatives.reduce((s, c) => s + c.revenue, 0);
     const adSpend = currentCreatives.reduce((s, c) => s + c.spend, 0);
     const roas = adSpend > 0 ? totalRevenue / adSpend : 0;
@@ -75,7 +78,6 @@ export async function GET(request: NextRequest) {
     const calcDelta = (cur: number, prev: number) =>
       prev === 0 ? (cur > 0 ? 100 : 0) : ((cur - prev) / prev) * 100;
 
-    // Revenue chart data: group by date
     const chartMap = new Map<string, { revenue: number; adSpend: number }>();
     for (const creative of currentCreatives) {
       const dateKey = creative.date.toISOString().split("T")[0];
@@ -88,7 +90,6 @@ export async function GET(request: NextRequest) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, data]) => ({ date, ...data }));
 
-    // ROAS by platform
     const platformMap = new Map<string, { revenue: number; spend: number }>();
     for (const creative of currentCreatives) {
       const p = creative.platform;
@@ -123,8 +124,9 @@ export async function GET(request: NextRequest) {
         end: dateRange.end.toISOString(),
       },
     });
-  } catch (error) {
-    console.error("Dashboard API error:", error);
+  } catch (e) {
+    if (e instanceof Response) return e;
+    console.error("Dashboard API error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
