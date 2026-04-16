@@ -67,6 +67,9 @@ function ShopifyConnectButton({
   onEdit: () => void;
 }) {
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showInput, setShowInput] = useState(false);
+  const [shopInput, setShopInput] = useState("");
+  const [shopError, setShopError] = useState<string | null>(null);
 
   async function handleDisconnect() {
     setDisconnecting(true);
@@ -80,6 +83,16 @@ function ShopifyConnectButton({
     } catch {
       setDisconnecting(false);
     }
+  }
+
+  function handleConnect() {
+    const raw = shopInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const shop = raw.includes(".myshopify.com") ? raw : raw ? `${raw}.myshopify.com` : "";
+    if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+      setShopError("e.g. store.myshopify.com");
+      return;
+    }
+    window.location.href = `/api/shopify/auth?clientId=${encodeURIComponent(clientId)}&shop=${encodeURIComponent(shop)}`;
   }
 
   if (connected && domain) {
@@ -129,9 +142,69 @@ function ShopifyConnectButton({
     );
   }
 
+  if (showInput) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+          <input
+            type="text"
+            value={shopInput}
+            onChange={(e) => { setShopInput(e.target.value); setShopError(null); }}
+            onKeyDown={(e) => e.key === "Enter" && handleConnect()}
+            placeholder="store.myshopify.com"
+            autoFocus
+            style={{
+              padding: "4px 7px",
+              borderRadius: "4px",
+              border: `1px solid ${shopError ? "rgba(239,68,68,0.6)" : "var(--border)"}`,
+              background: "var(--surface)",
+              color: "var(--text)",
+              fontSize: "11px",
+              fontFamily: "Space Mono, monospace",
+              outline: "none",
+              width: "150px",
+            }}
+          />
+          <button
+            onClick={handleConnect}
+            style={{
+              background: "var(--accent)",
+              border: "none",
+              borderRadius: "4px",
+              color: "white",
+              fontSize: "10px",
+              fontWeight: "600",
+              cursor: "pointer",
+              padding: "4px 7px",
+              fontFamily: "DM Sans, sans-serif",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Go
+          </button>
+          <button
+            onClick={() => { setShowInput(false); setShopInput(""); setShopError(null); }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text3)",
+              fontSize: "14px",
+              cursor: "pointer",
+              padding: "2px 4px",
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        {shopError && <span style={{ fontSize: "10px", color: "var(--red)" }}>{shopError}</span>}
+      </div>
+    );
+  }
+
   return (
-    <a
-      href={`/api/shopify/auth?clientId=${encodeURIComponent(clientId)}`}
+    <button
+      onClick={() => setShowInput(true)}
       style={{
         background: "transparent",
         border: "1px dashed var(--border)",
@@ -142,12 +215,10 @@ function ShopifyConnectButton({
         padding: "3px 8px",
         fontFamily: "DM Sans, sans-serif",
         whiteSpace: "nowrap",
-        textDecoration: "none",
-        display: "inline-block",
       }}
     >
       + Connect Shopify
-    </a>
+    </button>
   );
 }
 

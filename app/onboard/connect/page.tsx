@@ -101,6 +101,8 @@ function OnboardConnectInner() {
   const [conn, setConn] = useState<ConnectionStatus>({ shopifyConnected: false, shopifyDomain: null });
   const [fetchingStatus, setFetchingStatus] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
+  const [shopInput, setShopInput] = useState("");
+  const [shopError, setShopError] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     if (!session?.user?.clientId) return;
@@ -192,21 +194,113 @@ function OnboardConnectInner() {
 
         {/* Integration cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "28px" }}>
-          <IntegrationCard
-            icon={
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
-                <path d="m1 1 4 4 2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-              </svg>
-            }
-            title="Shopify"
-            description="Sync products, orders, and inventory"
-            connected={conn.shopifyConnected}
-            domain={conn.shopifyDomain}
-            actionLabel={conn.shopifyConnected ? "Shopify Connected" : "Connect Shopify"}
-            onAction={() => { window.location.href = "/api/shopify/auth"; }}
-            disabled={false}
-          />
+          {/* Shopify card — custom layout to include shop input */}
+          <div
+            style={{
+              background: "var(--surface)",
+              border: `1px solid ${conn.shopifyConnected ? "rgba(34,197,94,0.35)" : "var(--border)"}`,
+              borderRadius: "14px",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "var(--surface2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+                    <path d="m1 1 4 4 2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: "0 0 3px", fontSize: "15px", fontWeight: "600", color: "var(--text)" }}>Shopify</h3>
+                  <p style={{ margin: 0, fontSize: "12px", color: "var(--text3)" }}>Sync products, orders, and inventory</p>
+                </div>
+              </div>
+              {conn.shopifyConnected && (
+                <span style={{ flexShrink: 0, padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: "700", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", color: "var(--green)" }}>
+                  Connected
+                </span>
+              )}
+            </div>
+
+            {conn.shopifyConnected && conn.shopifyDomain && (
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text2)", fontFamily: "Space Mono, monospace" }}>{conn.shopifyDomain}</p>
+            )}
+
+            {!conn.shopifyConnected && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <input
+                  type="text"
+                  value={shopInput}
+                  onChange={(e) => { setShopInput(e.target.value); setShopError(null); }}
+                  placeholder="your-store.myshopify.com"
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: `1px solid ${shopError ? "rgba(239,68,68,0.6)" : "var(--border)"}`,
+                    background: "var(--surface2)",
+                    color: "var(--text)",
+                    fontSize: "13px",
+                    fontFamily: "Space Mono, monospace",
+                    outline: "none",
+                    width: "100%",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {shopError && (
+                  <p style={{ margin: 0, fontSize: "12px", color: "var(--red)" }}>{shopError}</p>
+                )}
+                <button
+                  onClick={() => {
+                    const raw = shopInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+                    const shop = raw.includes(".myshopify.com") ? raw : raw ? `${raw}.myshopify.com` : "";
+                    if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+                      setShopError("Enter a valid Shopify store URL, e.g. your-store.myshopify.com");
+                      return;
+                    }
+                    window.location.href = `/api/shopify/auth?shop=${encodeURIComponent(shop)}`;
+                  }}
+                  style={{
+                    padding: "9px 16px",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    fontFamily: "DM Sans, sans-serif",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    color: "var(--text)",
+                    width: "fit-content",
+                  }}
+                >
+                  Connect Shopify
+                </button>
+              </div>
+            )}
+
+            {conn.shopifyConnected && (
+              <button
+                disabled
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  cursor: "not-allowed",
+                  fontFamily: "DM Sans, sans-serif",
+                  border: "1px solid rgba(34,197,94,0.3)",
+                  background: "rgba(34,197,94,0.08)",
+                  color: "var(--green)",
+                  width: "fit-content",
+                }}
+              >
+                ✓ Shopify Connected
+              </button>
+            )}
+          </div>
 
           <IntegrationCard
             icon={

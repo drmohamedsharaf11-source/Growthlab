@@ -4,6 +4,18 @@ import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
 import { Role } from "@prisma/client";
 
+/** Strip protocol/trailing slash, append .myshopify.com if missing */
+function normalizeShop(raw: string): string {
+  const s = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  if (!s) return "";
+  return s.includes(".myshopify.com") ? s : `${s}.myshopify.com`;
+}
+
+/** Only allow "something.myshopify.com" with valid handle characters */
+function isValidShop(shop: string): boolean {
+  return /^[a-z0-9-]+\.myshopify\.com$/.test(shop);
+}
+
 export async function GET(request: NextRequest) {
   console.log('[shopify/auth] params:', Object.fromEntries(new URL(request.url).searchParams));
 
@@ -14,21 +26,27 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
 
+  // Shop must always come from the caller — no env-var fallback
+  const shop = normalizeShop(searchParams.get("shop") || "");
+  if (!shop || !isValidShop(shop)) {
+    return NextResponse.json(
+      { error: "A valid shop domain is required (e.g. your-store.myshopify.com)" },
+      { status: 400 }
+    );
+  }
+
   // Determine clientId and redirect source based on role
   let clientId: string | null;
   let source: string;
 
   if (session.user.role === Role.ADMIN) {
-    // Admin can connect on behalf of any client via ?clientId=
     clientId = searchParams.get("clientId") ?? null;
     source = "admin";
   } else {
-    // Client: always use their own clientId from session
     clientId = session.user.clientId;
     source = "onboard";
   }
 
-  const shop = process.env.SHOPIFY_SHOP || "pinkrose-eg.myshopify.com";
   const apiKey = process.env.SHOPIFY_CLIENT_ID;
   const baseUrl = process.env.NEXTAUTH_URL || "";
   const redirectUri = `${baseUrl}/api/shopify/callback`;
