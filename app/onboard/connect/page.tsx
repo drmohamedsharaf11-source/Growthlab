@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -94,7 +94,7 @@ function IntegrationCard({
   );
 }
 
-export default function OnboardConnectPage() {
+function OnboardConnectInner() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -280,5 +280,18 @@ export default function OnboardConnectPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary in Next.js 14
+export default function OnboardConnectPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+        <div style={{ color: "var(--text2)", fontSize: "14px" }}>Loading…</div>
+      </div>
+    }>
+      <OnboardConnectInner />
+    </Suspense>
   );
 }
