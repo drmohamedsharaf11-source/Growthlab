@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${dashboardUrl}?shopify=error&msg=invalid_state`);
     }
 
-    let savedState: { state: string; clientId: string | null };
+    let savedState: { state: string; clientId: string | null; source?: string };
     try {
       savedState = JSON.parse(stateCookieRaw);
     } catch {
@@ -120,9 +120,12 @@ export async function GET(request: NextRequest) {
       console.log('[shopify/callback] database save complete');
     }
 
-    return NextResponse.redirect(
-      `${dashboardUrl}?shopify=connected&shop=${encodeURIComponent(shop)}`
-    );
+    // Redirect based on where the OAuth was initiated
+    const successUrl = savedState.source === "onboard"
+      ? `${baseUrl}/onboard/connect?shopify=connected&shop=${encodeURIComponent(shop)}`
+      : `${dashboardUrl}?shopify=connected&shop=${encodeURIComponent(shop)}`;
+
+    return NextResponse.redirect(successUrl);
   } catch (e) {
     console.error('[shopify/callback] ERROR:', e);
     return NextResponse.redirect(new URL('/dashboard/shopify?error=callback_failed', request.url));

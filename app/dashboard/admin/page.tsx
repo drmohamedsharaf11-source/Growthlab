@@ -20,6 +20,13 @@ export default function AdminPage() {
     message: string;
   } | null>(null);
 
+  // Invite modal state
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ clientName: "", email: "" });
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ inviteUrl: string; email: string } | null>(null);
+  const [inviteError, setInviteError] = useState("");
+
   // Handle Shopify OAuth redirect result
   useEffect(() => {
     const shopify = searchParams.get("shopify");
@@ -104,6 +111,40 @@ export default function AdminPage() {
     } catch {
       // fail silently
     }
+  }
+
+  async function handleSendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    setInviteError("");
+    setInviteLoading(true);
+    try {
+      const res = await fetch("/api/admin/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(inviteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInviteError(data.error || "Failed to create invite.");
+        return;
+      }
+      setInviteResult({ inviteUrl: data.inviteUrl, email: data.email });
+      // Copy to clipboard immediately
+      navigator.clipboard.writeText(data.inviteUrl).catch(() => {});
+      // Refresh clients list so new (empty) client appears
+      fetchClients();
+    } catch {
+      setInviteError("An unexpected error occurred.");
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
+  function closeInviteModal() {
+    setShowInviteModal(false);
+    setInviteForm({ clientName: "", email: "" });
+    setInviteResult(null);
+    setInviteError("");
   }
 
   function handleClientSaved(client: ClientData) {
@@ -209,16 +250,33 @@ export default function AdminPage() {
 
         {/* Clients table */}
         <div>
-          <h2
-            style={{
-              margin: "0 0 16px",
-              fontSize: "16px",
-              fontWeight: "600",
-              color: "var(--text)",
-            }}
-          >
-            All Clients
-          </h2>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "600", color: "var(--text)" }}>
+              All Clients
+            </h2>
+            <button
+              onClick={() => setShowInviteModal(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 16px",
+                background: "linear-gradient(135deg, var(--accent), var(--accent2))",
+                border: "none",
+                borderRadius: "8px",
+                color: "white",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer",
+                fontFamily: "DM Sans, sans-serif",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Invite Client
+            </button>
+          </div>
 
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
@@ -236,6 +294,106 @@ export default function AdminPage() {
           )}
         </div>
       </div>
+
+      {/* Invite Client Modal */}
+      {showInviteModal && (
+        <div
+          onClick={closeInviteModal}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 100, padding: "24px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: "16px", padding: "32px", width: "100%", maxWidth: "440px",
+            }}
+          >
+            {!inviteResult ? (
+              <>
+                <h2 style={{ margin: "0 0 6px", fontSize: "18px", fontWeight: "700", color: "var(--text)" }}>
+                  Invite a Client
+                </h2>
+                <p style={{ margin: "0 0 24px", fontSize: "13px", color: "var(--text2)" }}>
+                  They&apos;ll receive a signup link valid for 7 days.
+                </p>
+
+                {inviteError && (
+                  <div style={{ padding: "10px 14px", borderRadius: "8px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)", fontSize: "13px", marginBottom: "16px" }}>
+                    {inviteError}
+                  </div>
+                )}
+
+                <form onSubmit={handleSendInvite} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: "500", color: "var(--text2)", marginBottom: "6px" }}>
+                      Client / Brand Name
+                    </label>
+                    <input
+                      type="text" required
+                      value={inviteForm.clientName}
+                      onChange={(e) => setInviteForm(f => ({ ...f, clientName: e.target.value }))}
+                      placeholder="e.g. Acme Store"
+                      style={{ width: "100%", padding: "10px 12px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "14px", fontFamily: "DM Sans, sans-serif", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: "500", color: "var(--text2)", marginBottom: "6px" }}>
+                      Client Email
+                    </label>
+                    <input
+                      type="email" required
+                      value={inviteForm.email}
+                      onChange={(e) => setInviteForm(f => ({ ...f, email: e.target.value }))}
+                      placeholder="client@example.com"
+                      style={{ width: "100%", padding: "10px 12px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "14px", fontFamily: "DM Sans, sans-serif", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", paddingTop: "4px" }}>
+                    <button type="button" onClick={closeInviteModal}
+                      style={{ flex: 1, padding: "10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text2)", fontSize: "14px", fontWeight: "500", cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={inviteLoading}
+                      style={{ flex: 1, padding: "10px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: "8px", color: "white", fontSize: "14px", fontWeight: "600", cursor: inviteLoading ? "not-allowed" : "pointer", opacity: inviteLoading ? 0.7 : 1, fontFamily: "DM Sans, sans-serif" }}>
+                      {inviteLoading ? "Creating…" : "Create Invite"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign: "center", marginBottom: "24px" }}>
+                  <div style={{ fontSize: "32px", marginBottom: "12px" }}>✓</div>
+                  <h2 style={{ margin: "0 0 6px", fontSize: "18px", fontWeight: "700", color: "var(--text)" }}>Invite Created!</h2>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text2)" }}>
+                    Link copied to clipboard. Send it to <strong>{inviteResult.email}</strong>.
+                  </p>
+                </div>
+
+                <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 14px", marginBottom: "16px", wordBreak: "break-all", fontSize: "12px", color: "var(--text2)", fontFamily: "Space Mono, monospace" }}>
+                  {inviteResult.inviteUrl}
+                </div>
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(inviteResult.inviteUrl)}
+                    style={{ flex: 1, padding: "10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
+                    Copy Link
+                  </button>
+                  <button onClick={closeInviteModal}
+                    style={{ flex: 1, padding: "10px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: "8px", color: "white", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

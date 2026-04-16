@@ -1,11 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
+import { auth } from "@/lib/auth";
+import { Role } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
   console.log('[shopify/auth] params:', Object.fromEntries(new URL(request.url).searchParams));
+
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const clientId = searchParams.get("clientId") ?? null;
+
+  // Determine clientId and redirect source based on role
+  let clientId: string | null;
+  let source: string;
+
+  if (session.user.role === Role.ADMIN) {
+    // Admin can connect on behalf of any client via ?clientId=
+    clientId = searchParams.get("clientId") ?? null;
+    source = "admin";
+  } else {
+    // Client: always use their own clientId from session
+    clientId = session.user.clientId;
+    source = "onboard";
+  }
 
   const shop = process.env.SHOPIFY_SHOP || "pinkrose-eg.myshopify.com";
   const apiKey = process.env.SHOPIFY_CLIENT_ID;
@@ -20,12 +41,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Generate a random state token for CSRF protection
   const state = crypto.randomBytes(16).toString("hex");
 
-  // Persist state + clientId in an httpOnly cookie (10-minute TTL)
   const cookieStore = await cookies();
-  cookieStore.set("shopify_oauth_state", JSON.stringify({ state, clientId }), {
+  cookieStore.set("shopify_oauth_state", JSON.stringify({ state, clientId, source }), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

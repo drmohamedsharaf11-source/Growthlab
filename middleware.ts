@@ -19,11 +19,15 @@ export default auth((req) => {
     if (!isAuthenticated) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
+  // /onboard/connect — requires auth (unauthenticated users get /login)
+  // /onboard/[token] is NOT in the matcher so it passes through unauthenticated
+  } else if (pathname === "/onboard/connect") {
+    if (!isAuthenticated) {
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
   }
 });
 
 export const config = {
-  // Run only on dashboard routes; /login, /onboard, /api/auth, _next, and
-  // static assets are excluded by default since they don't match this pattern.
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/onboard/connect"],
 };
