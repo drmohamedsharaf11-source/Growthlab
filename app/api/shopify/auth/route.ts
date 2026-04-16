@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
+  console.log('[shopify/auth] params:', Object.fromEntries(new URL(request.url).searchParams));
   const { searchParams } = new URL(request.url);
   const clientId = searchParams.get("clientId") ?? null;
 
