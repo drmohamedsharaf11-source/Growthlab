@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import Topbar from "@/components/layout/Topbar";
+import ClientSwitcher from "@/components/layout/ClientSwitcher";
 import ProductsTable from "@/components/shopify/ProductsTable";
 import VariantsTable from "@/components/shopify/VariantsTable";
 import { useClient } from "@/hooks/useClient";
@@ -12,7 +13,7 @@ type TabType = "products" | "variants";
 
 export default function ShopifyPage() {
   const { data: session } = useSession();
-  const { client } = useClient(session?.user?.clientId);
+  const { client, clients, setClient } = useClient(session?.user?.clientId);
   const [tab, setTab] = useState<TabType>("products");
   const [products, setProducts] = useState<ProductData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +61,13 @@ export default function ShopifyPage() {
       <Topbar title="Shopify Reports" clientId={client?.id} />
 
       <div style={{ padding: "24px" }}>
+        {/* Client switcher (admin only) */}
+        {session?.user?.role === "ADMIN" && clients.length > 1 && (
+          <div style={{ marginBottom: "20px" }}>
+            <ClientSwitcher clients={clients} selectedClient={client} onSelect={setClient} />
+          </div>
+        )}
+
         {/* Stats bar */}
         <div
           style={{

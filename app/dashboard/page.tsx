@@ -138,6 +138,36 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* No-ads empty state */}
+        {client && !loading && data && data.kpis.adSpend === 0 && data.topCreatives.length === 0 && (
+          <div
+            style={{
+              padding: "14px 18px",
+              background: "rgba(99,102,241,0.07)",
+              border: "1px solid rgba(99,102,241,0.2)",
+              borderRadius: "10px",
+              marginBottom: "20px",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              fontSize: "13px",
+              color: "var(--text2)",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>
+              Connect Meta or TikTok Ads to see revenue and ROAS metrics.
+              {data.products.length > 0 && (
+                <> You have <strong style={{ color: "var(--text)" }}>{data.products.length} products</strong> synced from Shopify.</>
+              )}
+            </span>
+          </div>
+        )}
+
         {client && (
           <>
             {/* KPI Grid */}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import Topbar from "@/components/layout/Topbar";
+import ClientSwitcher from "@/components/layout/ClientSwitcher";
 import SellThroughList from "@/components/inventory/SellThroughList";
 import RestockCalculator from "@/components/inventory/RestockCalculator";
 import { useClient } from "@/hooks/useClient";
@@ -12,7 +13,7 @@ type ViewType = "sellthrough" | "restock";
 
 export default function InventoryPage() {
   const { data: session } = useSession();
-  const { client } = useClient(session?.user?.clientId);
+  const { client, clients, setClient } = useClient(session?.user?.clientId);
   const [view, setView] = useState<ViewType>("sellthrough");
   const [products, setProducts] = useState<ProductData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,13 @@ export default function InventoryPage() {
       <Topbar title="Inventory" clientId={client?.id} />
 
       <div style={{ padding: "24px" }}>
+        {/* Client switcher (admin only) */}
+        {session?.user?.role === "ADMIN" && clients.length > 1 && (
+          <div style={{ marginBottom: "20px" }}>
+            <ClientSwitcher clients={clients} selectedClient={client} onSelect={setClient} />
+          </div>
+        )}
+
         {/* View toggle */}
         <div
           style={{
