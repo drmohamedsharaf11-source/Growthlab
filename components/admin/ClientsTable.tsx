@@ -311,7 +311,7 @@ export default function ClientsTable({
               <ShopifyConnectButton
                 clientId={client.id}
                 domain={client.shopifyDomain}
-                connected={!!(client.shopifyToken && client.shopifyToken.length > 0 && client.shopifyDomain && client.shopifyDomain.length > 0)}
+                connected={!!(client.shopifyConnected && client.shopifyDomain)}
               />
 
               <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>

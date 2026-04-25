@@ -90,7 +90,7 @@ export default function AddClientForm({
   );
   const [shopifyTestStatus, setShopifyTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [shopifyTestMsg, setShopifyTestMsg] = useState("");
-  const [editingShopify, setEditingShopify] = useState(!editClient?.shopifyToken);
+  const [editingShopify, setEditingShopify] = useState(!editClient?.shopifyConnected);
 
   const set = (key: string) => (val: string) =>
     setFormData((prev) => ({ ...prev, [key]: val }));
@@ -244,7 +244,7 @@ export default function AddClientForm({
         </p>
 
         {/* Already connected + not editing */}
-        {editClient?.shopifyToken && editClient?.shopifyDomain && !editingShopify ? (
+        {editClient?.shopifyConnected && editClient?.shopifyDomain && !editingShopify ? (
           <div
             style={{
               display: "flex",
