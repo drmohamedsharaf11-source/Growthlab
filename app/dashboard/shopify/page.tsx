@@ -28,6 +28,7 @@ export default function ShopifyPage() {
   const [products, setProducts] = useState<ProductData[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | Date | null | undefined>(undefined);
 
   const fetchProducts = useCallback(async () => {
@@ -57,17 +58,31 @@ export default function ShopifyPage() {
   }, [client?.lastShopifySyncAt]);
 
   async function syncShopify() {
-    if (!client?.id) return;
+    if (!client?.id) {
+      console.warn("[sync] no client — cannot sync");
+      return;
+    }
+    console.log("[sync] starting sync for client:", client.id);
     setSyncing(true);
+    setSyncError(null);
     try {
       const res = await fetch("/api/sync/shopify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId: client.id }),
       });
+      console.log("[sync] response status:", res.status);
       const data = await res.json();
+      console.log("[sync] response data:", data);
+      if (!res.ok) {
+        setSyncError(data.error || `Sync failed (${res.status})`);
+        return;
+      }
       if (data.lastShopifySyncAt) setLastSyncedAt(data.lastShopifySyncAt);
       await fetchProducts();
+    } catch (err) {
+      console.error("[sync] fetch error:", err);
+      setSyncError("Network error — please try again");
     } finally {
       setSyncing(false);
     }
@@ -181,6 +196,25 @@ export default function ShopifyPage() {
             </span>
           </div>
         </div>
+
+        {/* Sync error */}
+        {syncError && (
+          <div style={{
+            padding: "10px 14px",
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: "8px",
+            color: "var(--red)",
+            fontSize: "13px",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}>
+            <span>Sync failed: {syncError}</span>
+            <button onClick={() => setSyncError(null)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: "16px", lineHeight: 1, padding: "0 2px" }}>×</button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div
