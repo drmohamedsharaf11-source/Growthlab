@@ -1,3 +1,4 @@
+// DEPRECATED: OAuth flow replaced by Client Credentials Grant in Phase 2.5
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";

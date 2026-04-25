@@ -4,6 +4,15 @@ import bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { requireAuth, requireAdmin } from "@/lib/auth-helpers";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sanitizeClient(client: any) {
+  const { shopifyToken, shopifyClientId, shopifyClientSecret, ...rest } = client;
+  return {
+    ...rest,
+    shopifyConnected: !!(shopifyToken && shopifyToken.length > 0),
+  };
+}
+
 export async function GET() {
   try {
     const session = await requireAuth();
@@ -17,7 +26,7 @@ export async function GET() {
         },
         orderBy: { createdAt: "desc" },
       });
-      return NextResponse.json(clients);
+      return NextResponse.json(clients.map(sanitizeClient));
     }
 
     // CLIENT — return only their own client
@@ -31,7 +40,7 @@ export async function GET() {
         adAccounts: true,
       },
     });
-    return NextResponse.json(client ? [client] : []);
+    return NextResponse.json(client ? [sanitizeClient(client)] : []);
   } catch (e) {
     if (e instanceof Response) return e;
     console.error("GET /api/clients error:", e);

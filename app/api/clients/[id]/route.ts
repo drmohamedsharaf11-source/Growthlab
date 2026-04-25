@@ -3,6 +3,15 @@ import prisma from "@/lib/prisma";
 import { Role } from "@prisma/client";
 import { requireAuth, requireAdmin } from "@/lib/auth-helpers";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sanitizeClient(client: any) {
+  const { shopifyToken, shopifyClientId, shopifyClientSecret, ...rest } = client;
+  return {
+    ...rest,
+    shopifyConnected: !!(shopifyToken && shopifyToken.length > 0),
+  };
+}
+
 type RouteContext = { params: { id: string } };
 
 export async function GET(_request: NextRequest, { params }: RouteContext) {
@@ -36,7 +45,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
 
-    return NextResponse.json(client);
+    return NextResponse.json(sanitizeClient(client));
   } catch (e) {
     if (e instanceof Response) return e;
     console.error("GET /api/clients/[id] error:", e);
@@ -59,6 +68,8 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       name,
       shopifyDomain,
       shopifyToken,
+      shopifyClientId: bodyShopifyClientId,
+      shopifyClientSecret: bodyShopifyClientSecret,
       metaAccountId,
       metaAccessToken,
       tiktokAccountId,
@@ -67,7 +78,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       status,
     } = body;
 
-    // Clients cannot set their own tokens — only ADMIN or the OAuth flow can
+    // Clients cannot set their own tokens — only ADMIN or the connect flow can
     if (!isAdmin && (shopifyToken !== undefined || metaAccessToken !== undefined || tiktokAccessToken !== undefined)) {
       return NextResponse.json(
         { error: "Forbidden: token fields can only be set by an admin" },
@@ -81,6 +92,9 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
         ...(name && { name }),
         ...(shopifyDomain !== undefined && { shopifyDomain }),
         ...(isAdmin && shopifyToken !== undefined && { shopifyToken }),
+        // Allow nulling out Shopify credentials (disconnect)
+        ...(isAdmin && bodyShopifyClientId !== undefined && { shopifyClientId: bodyShopifyClientId }),
+        ...(isAdmin && bodyShopifyClientSecret !== undefined && { shopifyClientSecret: bodyShopifyClientSecret }),
         ...(metaAccountId !== undefined && { metaAccountId }),
         ...(isAdmin && metaAccessToken !== undefined && { metaAccessToken }),
         ...(tiktokAccountId !== undefined && { tiktokAccountId }),
@@ -90,7 +104,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       },
     });
 
-    return NextResponse.json(client);
+    return NextResponse.json(sanitizeClient(client));
   } catch (e) {
     if (e instanceof Response) return e;
     console.error("PUT /api/clients/[id] error:", e);

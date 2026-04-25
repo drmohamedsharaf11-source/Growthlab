@@ -101,8 +101,13 @@ function OnboardConnectInner() {
   const [conn, setConn] = useState<ConnectionStatus>({ shopifyConnected: false, shopifyDomain: null });
   const [fetchingStatus, setFetchingStatus] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
-  const [shopInput, setShopInput] = useState("");
-  const [shopError, setShopError] = useState<string | null>(null);
+
+  // Shopify credentials form state
+  const [shopDomain, setShopDomain] = useState("");
+  const [shopClientId, setShopClientId] = useState("");
+  const [shopClientSecret, setShopClientSecret] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     if (!session?.user?.clientId) return;
@@ -112,7 +117,7 @@ function OnboardConnectInner() {
       if (res.ok) {
         const data = await res.json();
         setConn({
-          shopifyConnected: !!(data.shopifyToken && data.shopifyDomain),
+          shopifyConnected: !!(data.shopifyConnected),
           shopifyDomain: data.shopifyDomain ?? null,
         });
       }
@@ -121,7 +126,6 @@ function OnboardConnectInner() {
     }
   }, [session?.user?.clientId]);
 
-  // Redirect unauthenticated (middleware handles it, but belt-and-suspenders)
   useEffect(() => {
     if (status === "unauthenticated") {
       router.replace("/login");
@@ -134,7 +138,7 @@ function OnboardConnectInner() {
     }
   }, [session?.user?.clientId, fetchStatus]);
 
-  // Handle return from Shopify OAuth
+  // Keep legacy query param support in case someone lands here from an old link
   useEffect(() => {
     const shopify = searchParams.get("shopify");
     const shop = searchParams.get("shop");
@@ -145,6 +149,45 @@ function OnboardConnectInner() {
       setTimeout(() => setBanner(null), 5000);
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleConnectShopify() {
+    setConnectError(null);
+    const raw = shopDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const shop = raw.includes(".myshopify.com") ? raw : raw ? `${raw}.myshopify.com` : "";
+    if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+      setConnectError("Enter a valid Shopify store URL, e.g. your-store.myshopify.com");
+      return;
+    }
+    if (!shopClientId.trim()) {
+      setConnectError("Client ID is required");
+      return;
+    }
+    if (!shopClientSecret.trim()) {
+      setConnectError("Client Secret is required");
+      return;
+    }
+
+    setConnecting(true);
+    try {
+      const res = await fetch("/api/shopify/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopDomain: shop, clientId: shopClientId.trim(), clientSecret: shopClientSecret.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBanner(`Connected to ${data.shop}`);
+        await fetchStatus();
+        setTimeout(() => setBanner(null), 5000);
+      } else {
+        setConnectError(data.error || "Connection failed — please check your credentials");
+      }
+    } catch {
+      setConnectError("Network error — please try again");
+    } finally {
+      setConnecting(false);
+    }
+  }
 
   if (status === "loading" || fetchingStatus) {
     return (
@@ -194,7 +237,7 @@ function OnboardConnectInner() {
 
         {/* Integration cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "28px" }}>
-          {/* Shopify card — custom layout to include shop input */}
+          {/* Shopify card */}
           <div
             style={{
               background: "var(--surface)",
@@ -230,58 +273,7 @@ function OnboardConnectInner() {
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text2)", fontFamily: "Space Mono, monospace" }}>{conn.shopifyDomain}</p>
             )}
 
-            {!conn.shopifyConnected && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <input
-                  type="text"
-                  value={shopInput}
-                  onChange={(e) => { setShopInput(e.target.value); setShopError(null); }}
-                  placeholder="your-store.myshopify.com"
-                  style={{
-                    padding: "9px 12px",
-                    borderRadius: "8px",
-                    border: `1px solid ${shopError ? "rgba(239,68,68,0.6)" : "var(--border)"}`,
-                    background: "var(--surface2)",
-                    color: "var(--text)",
-                    fontSize: "13px",
-                    fontFamily: "Space Mono, monospace",
-                    outline: "none",
-                    width: "100%",
-                    boxSizing: "border-box",
-                  }}
-                />
-                {shopError && (
-                  <p style={{ margin: 0, fontSize: "12px", color: "var(--red)" }}>{shopError}</p>
-                )}
-                <button
-                  onClick={() => {
-                    const raw = shopInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
-                    const shop = raw.includes(".myshopify.com") ? raw : raw ? `${raw}.myshopify.com` : "";
-                    if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
-                      setShopError("Enter a valid Shopify store URL, e.g. your-store.myshopify.com");
-                      return;
-                    }
-                    window.location.href = `/api/shopify/auth?shop=${encodeURIComponent(shop)}`;
-                  }}
-                  style={{
-                    padding: "9px 16px",
-                    borderRadius: "8px",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    fontFamily: "DM Sans, sans-serif",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface2)",
-                    color: "var(--text)",
-                    width: "fit-content",
-                  }}
-                >
-                  Connect Shopify
-                </button>
-              </div>
-            )}
-
-            {conn.shopifyConnected && (
+            {conn.shopifyConnected ? (
               <button
                 disabled
                 style={{
@@ -299,6 +291,79 @@ function OnboardConnectInner() {
               >
                 ✓ Shopify Connected
               </button>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {/* Setup guide */}
+                <div style={{
+                  background: "var(--surface2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "10px",
+                  padding: "14px 16px",
+                  fontSize: "12px",
+                  color: "var(--text2)",
+                  lineHeight: "1.7",
+                }}>
+                  <p style={{ margin: "0 0 8px", fontWeight: "600", color: "var(--text)", fontSize: "12px" }}>To connect your Shopify store:</p>
+                  <ol style={{ margin: 0, paddingLeft: "16px" }}>
+                    <li>Go to <strong style={{ color: "var(--text)" }}>dev.shopify.com</strong> and select your store</li>
+                    <li>Click <strong style={{ color: "var(--text)" }}>Create app</strong> and name it <em>GrowthOS Integration</em></li>
+                    <li>Under <strong style={{ color: "var(--text)" }}>Configuration › Admin API access scopes</strong>, add:<br />
+                      <code style={{ fontSize: "11px", color: "var(--accent)", fontFamily: "Space Mono, monospace" }}>read_orders, read_products, read_inventory, read_customers, read_analytics</code>
+                    </li>
+                    <li><strong style={{ color: "var(--text)" }}>Install the app</strong> on your store</li>
+                    <li>Copy the <strong style={{ color: "var(--text)" }}>Client ID</strong> and <strong style={{ color: "var(--text)" }}>Client Secret</strong> below</li>
+                  </ol>
+                </div>
+
+                {/* Credentials form */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <input
+                    type="text"
+                    value={shopDomain}
+                    onChange={(e) => { setShopDomain(e.target.value); setConnectError(null); }}
+                    placeholder="your-store.myshopify.com"
+                    style={inputStyle(!!connectError && !shopDomain)}
+                  />
+                  <input
+                    type="text"
+                    value={shopClientId}
+                    onChange={(e) => { setShopClientId(e.target.value); setConnectError(null); }}
+                    placeholder="Client ID"
+                    style={inputStyle(false)}
+                  />
+                  <input
+                    type="password"
+                    value={shopClientSecret}
+                    onChange={(e) => { setShopClientSecret(e.target.value); setConnectError(null); }}
+                    placeholder="Client Secret"
+                    style={inputStyle(false)}
+                  />
+
+                  {connectError && (
+                    <p style={{ margin: 0, fontSize: "12px", color: "var(--red)" }}>{connectError}</p>
+                  )}
+
+                  <button
+                    onClick={handleConnectShopify}
+                    disabled={connecting}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      cursor: connecting ? "not-allowed" : "pointer",
+                      fontFamily: "DM Sans, sans-serif",
+                      border: "1px solid var(--border)",
+                      background: connecting ? "var(--surface3)" : "var(--surface2)",
+                      color: connecting ? "var(--text3)" : "var(--text)",
+                      width: "fit-content",
+                      opacity: connecting ? 0.7 : 1,
+                    }}
+                  >
+                    {connecting ? "Verifying credentials…" : "Connect Shopify"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -377,7 +442,21 @@ function OnboardConnectInner() {
   );
 }
 
-// useSearchParams() requires a Suspense boundary in Next.js 14
+function inputStyle(hasError: boolean): React.CSSProperties {
+  return {
+    padding: "9px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${hasError ? "rgba(239,68,68,0.6)" : "var(--border)"}`,
+    background: "var(--surface2)",
+    color: "var(--text)",
+    fontSize: "13px",
+    fontFamily: "Space Mono, monospace",
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+}
+
 export default function OnboardConnectPage() {
   return (
     <Suspense fallback={

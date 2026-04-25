@@ -59,17 +59,18 @@ function ShopifyConnectButton({
   clientId,
   domain,
   connected,
-  onEdit,
 }: {
   clientId: string;
   domain: string | null;
   connected: boolean;
-  onEdit: () => void;
 }) {
   const [disconnecting, setDisconnecting] = useState(false);
-  const [showInput, setShowInput] = useState(false);
-  const [shopInput, setShopInput] = useState("");
-  const [shopError, setShopError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [shopDomain, setShopDomain] = useState("");
+  const [shopClientId, setShopClientId] = useState("");
+  const [shopClientSecret, setShopClientSecret] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   async function handleDisconnect() {
     setDisconnecting(true);
@@ -77,7 +78,12 @@ function ShopifyConnectButton({
       await fetch(`/api/clients/${encodeURIComponent(clientId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopifyToken: null, shopifyDomain: null }),
+        body: JSON.stringify({
+          shopifyToken: null,
+          shopifyDomain: null,
+          shopifyClientId: null,
+          shopifyClientSecret: null,
+        }),
       });
       window.location.reload();
     } catch {
@@ -85,38 +91,55 @@ function ShopifyConnectButton({
     }
   }
 
-  function handleConnect() {
-    const raw = shopInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  async function handleConnect() {
+    setConnectError(null);
+    const raw = shopDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
     const shop = raw.includes(".myshopify.com") ? raw : raw ? `${raw}.myshopify.com` : "";
     if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
-      setShopError("e.g. store.myshopify.com");
+      setConnectError("e.g. store.myshopify.com");
       return;
     }
-    window.location.href = `/api/shopify/auth?clientId=${encodeURIComponent(clientId)}&shop=${encodeURIComponent(shop)}`;
+    if (!shopClientId.trim() || !shopClientSecret.trim()) {
+      setConnectError("All three fields are required");
+      return;
+    }
+    setConnecting(true);
+    try {
+      const res = await fetch("/api/shopify/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopDomain: shop, clientId: shopClientId.trim(), clientSecret: shopClientSecret.trim(), targetClientId: clientId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.location.reload();
+      } else {
+        setConnectError(data.error || "Connection failed");
+        setConnecting(false);
+      }
+    } catch {
+      setConnectError("Network error — please try again");
+      setConnecting(false);
+    }
   }
+
+  const inputSt: React.CSSProperties = {
+    padding: "4px 7px",
+    borderRadius: "4px",
+    border: "1px solid var(--border)",
+    background: "var(--surface)",
+    color: "var(--text)",
+    fontSize: "11px",
+    fontFamily: "Space Mono, monospace",
+    outline: "none",
+    width: "150px",
+  };
 
   if (connected && domain) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-        <span
-          style={{
-            fontSize: "11px",
-            color: "var(--green)",
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-          }}
-        >
-          <span
-            style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              background: "var(--green)",
-              display: "inline-block",
-              flexShrink: 0,
-            }}
-          />
+        <span style={{ fontSize: "11px", color: "var(--green)", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--green)", display: "inline-block", flexShrink: 0 }} />
           {domain.replace(".myshopify.com", "")}
         </span>
         <button
@@ -142,79 +165,44 @@ function ShopifyConnectButton({
     );
   }
 
-  if (showInput) {
+  if (showForm) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-          <input
-            type="text"
-            value={shopInput}
-            onChange={(e) => { setShopInput(e.target.value); setShopError(null); }}
-            onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-            placeholder="store.myshopify.com"
-            autoFocus
-            style={{
-              padding: "4px 7px",
-              borderRadius: "4px",
-              border: `1px solid ${shopError ? "rgba(239,68,68,0.6)" : "var(--border)"}`,
-              background: "var(--surface)",
-              color: "var(--text)",
-              fontSize: "11px",
-              fontFamily: "Space Mono, monospace",
-              outline: "none",
-              width: "150px",
-            }}
-          />
+        <input type="text" value={shopDomain} onChange={(e) => { setShopDomain(e.target.value); setConnectError(null); }} placeholder="store.myshopify.com" autoFocus style={inputSt} />
+        <input type="text" value={shopClientId} onChange={(e) => { setShopClientId(e.target.value); setConnectError(null); }} placeholder="Client ID" style={inputSt} />
+        <input type="password" value={shopClientSecret} onChange={(e) => { setShopClientSecret(e.target.value); setConnectError(null); }} placeholder="Client Secret" style={inputSt} />
+        {connectError && <span style={{ fontSize: "10px", color: "var(--red)" }}>{connectError}</span>}
+        <div style={{ display: "flex", gap: "4px" }}>
           <button
             onClick={handleConnect}
+            disabled={connecting}
             style={{
-              background: "var(--accent)",
-              border: "none",
-              borderRadius: "4px",
-              color: "white",
-              fontSize: "10px",
-              fontWeight: "600",
-              cursor: "pointer",
-              padding: "4px 7px",
-              fontFamily: "DM Sans, sans-serif",
-              whiteSpace: "nowrap",
+              background: "var(--accent)", border: "none", borderRadius: "4px", color: "white",
+              fontSize: "10px", fontWeight: "600", cursor: connecting ? "not-allowed" : "pointer",
+              padding: "4px 7px", fontFamily: "DM Sans, sans-serif", whiteSpace: "nowrap",
+              opacity: connecting ? 0.7 : 1,
             }}
           >
-            Go
+            {connecting ? "…" : "Connect"}
           </button>
           <button
-            onClick={() => { setShowInput(false); setShopInput(""); setShopError(null); }}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text3)",
-              fontSize: "14px",
-              cursor: "pointer",
-              padding: "2px 4px",
-              lineHeight: 1,
-            }}
+            onClick={() => { setShowForm(false); setShopDomain(""); setShopClientId(""); setShopClientSecret(""); setConnectError(null); }}
+            style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: "14px", cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}
           >
             ×
           </button>
         </div>
-        {shopError && <span style={{ fontSize: "10px", color: "var(--red)" }}>{shopError}</span>}
       </div>
     );
   }
 
   return (
     <button
-      onClick={() => setShowInput(true)}
+      onClick={() => setShowForm(true)}
       style={{
-        background: "transparent",
-        border: "1px dashed var(--border)",
-        borderRadius: "4px",
-        color: "var(--text3)",
-        fontSize: "11px",
-        cursor: "pointer",
-        padding: "3px 8px",
-        fontFamily: "DM Sans, sans-serif",
-        whiteSpace: "nowrap",
+        background: "transparent", border: "1px dashed var(--border)", borderRadius: "4px",
+        color: "var(--text3)", fontSize: "11px", cursor: "pointer", padding: "3px 8px",
+        fontFamily: "DM Sans, sans-serif", whiteSpace: "nowrap",
       }}
     >
       + Connect Shopify
@@ -324,7 +312,6 @@ export default function ClientsTable({
                 clientId={client.id}
                 domain={client.shopifyDomain}
                 connected={!!(client.shopifyToken && client.shopifyToken.length > 0 && client.shopifyDomain && client.shopifyDomain.length > 0)}
-                onEdit={() => onEdit(client)}
               />
 
               <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
