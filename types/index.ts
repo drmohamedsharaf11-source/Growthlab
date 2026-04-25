@@ -87,7 +87,8 @@ export interface ClientData {
   id: string;
   name: string;
   shopifyDomain: string | null;
-  shopifyToken: string | null;
+  shopifyToken?: string | null;
+  shopifyConnected?: boolean;
   metaAccountId: string | null;
   metaAccessToken: string | null;
   tiktokAccountId: string | null;
