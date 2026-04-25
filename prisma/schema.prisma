@@ -29,6 +29,7 @@ model Client {
   shopifyToken        String?
   shopifyClientId     String?
   shopifyClientSecret String?
+  lastShopifySyncAt   DateTime?
   metaAccountId     String?
   metaAccessToken   String?
   tiktokAccountId   String?

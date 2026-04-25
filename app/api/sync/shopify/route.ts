@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/prisma";
-import { syncShopifyData } from "@/lib/shopify";
-import { getPeriodDateRange } from "@/lib/reports";
+import { syncShopifyProducts } from "@/lib/syncShopifyProducts";
 import { Role } from "@prisma/client";
+import prisma from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -18,12 +17,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    // Verify client exists and has Shopify configured
     const client = await prisma.client.findUnique({ where: { id: clientId } });
-
     if (!client) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
-
     if (!client.shopifyDomain || !client.shopifyToken) {
       return NextResponse.json(
         { error: "Shopify credentials not configured for this client" },
@@ -31,64 +29,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const dateRange = getPeriodDateRange("MONTHLY");
-    const { products } = await syncShopifyData(
-      client.shopifyDomain,
-      client.shopifyToken,
-      dateRange
-    );
+    const { synced } = await syncShopifyProducts(clientId);
 
-    let synced = 0;
-    for (const productData of products) {
-      const { variants, ...productFields } = productData;
+    // Re-fetch lastShopifySyncAt to return to the client
+    const updated = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { lastShopifySyncAt: true },
+    });
 
-      // Find existing product by shopifyId
-      const existingProduct = await prisma.product.findFirst({
-        where: { clientId, shopifyId: productFields.shopifyId },
-      });
-
-      let product;
-      if (existingProduct) {
-        product = await prisma.product.update({
-          where: { id: existingProduct.id },
-          data: {
-            name: productFields.name,
-            totalSold: productFields.totalSold,
-            revenue: productFields.revenue,
-          },
-        });
-      } else {
-        product = await prisma.product.create({
-          data: { ...productFields, clientId },
-        });
-      }
-
-      // Upsert variants
-      for (const variant of variants) {
-        const existingVariant = await prisma.variant.findFirst({
-          where: { productId: product.id, shopifyId: variant.shopifyId },
-        });
-
-        if (existingVariant) {
-          await prisma.variant.update({
-            where: { id: existingVariant.id },
-            data: {
-              sold: variant.sold,
-              stockLeft: variant.stockLeft,
-              initialStock: Math.max(existingVariant.initialStock, variant.initialStock),
-              revenue: variant.revenue,
-            },
-          });
-        } else {
-          await prisma.variant.create({
-            data: { ...variant, productId: product.id },
-          });
-        }
-      }
-      synced++;
-    }
-
-    return NextResponse.json({ success: true, synced });
+    return NextResponse.json({ success: true, synced, lastShopifySyncAt: updated?.lastShopifySyncAt });
   } catch (error) {
     console.error("Shopify sync error:", error);
     return NextResponse.json(

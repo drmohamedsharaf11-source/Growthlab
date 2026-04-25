@@ -20,6 +20,16 @@ interface DashboardData {
   products: ProductData[];
 }
 
+function formatRelativeTime(date: string | Date | null | undefined): string {
+  if (!date) return "Never";
+  const d = typeof date === "string" ? new Date(date) : date;
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 function formatCurrency(val: number): string {
   if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M EGP`;
   if (val >= 1000) return `${(val / 1000).toFixed(0)}K EGP`;
@@ -135,6 +145,24 @@ export default function DashboardPage() {
             }}
           >
             {error}
+          </div>
+        )}
+
+        {/* Shopify sync freshness */}
+        {client && !loading && (
+          <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "6px" }}>
+            <span
+              style={{
+                width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0,
+                background: client.lastShopifySyncAt ? "var(--green)" : "var(--text3)",
+              }}
+            />
+            <span style={{ fontSize: "12px", color: "var(--text3)" }}>
+              Shopify — Last synced:{" "}
+              <strong style={{ color: "var(--text2)" }}>
+                {client.lastShopifySyncAt ? formatRelativeTime(client.lastShopifySyncAt) : "Never"}
+              </strong>
+            </span>
           </div>
         )}
 

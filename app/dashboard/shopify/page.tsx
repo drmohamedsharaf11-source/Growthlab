@@ -11,6 +11,16 @@ import { ProductData } from "@/types";
 
 type TabType = "products" | "variants";
 
+function formatRelativeTime(date: string | Date | null | undefined): string {
+  if (!date) return "Never";
+  const d = typeof date === "string" ? new Date(date) : date;
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 export default function ShopifyPage() {
   const { data: session } = useSession();
   const { client, clients, setClient } = useClient(session?.user?.clientId);
@@ -18,6 +28,7 @@ export default function ShopifyPage() {
   const [products, setProducts] = useState<ProductData[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | Date | null | undefined>(undefined);
 
   const fetchProducts = useCallback(async () => {
     if (!client?.id) return;
@@ -38,15 +49,24 @@ export default function ShopifyPage() {
     fetchProducts();
   }, [fetchProducts]);
 
+  // Seed lastSyncedAt from client data on load
+  useEffect(() => {
+    if (client?.lastShopifySyncAt !== undefined) {
+      setLastSyncedAt(client.lastShopifySyncAt);
+    }
+  }, [client?.lastShopifySyncAt]);
+
   async function syncShopify() {
     if (!client?.id) return;
     setSyncing(true);
     try {
-      await fetch("/api/sync/shopify", {
+      const res = await fetch("/api/sync/shopify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId: client.id }),
       });
+      const data = await res.json();
+      if (data.lastShopifySyncAt) setLastSyncedAt(data.lastShopifySyncAt);
       await fetchProducts();
     } finally {
       setSyncing(false);
@@ -126,8 +146,8 @@ export default function ShopifyPage() {
             </span>
           </div>
 
-          {/* Sync button */}
-          <div style={{ marginLeft: "auto" }}>
+          {/* Sync button + last synced */}
+          <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
             <button
               onClick={syncShopify}
               disabled={syncing}
@@ -147,12 +167,18 @@ export default function ShopifyPage() {
                 opacity: syncing ? 0.6 : 1,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={syncing ? { animation: "spin 1s linear infinite" } : undefined}
+              >
                 <polyline points="1 4 1 10 7 10" />
                 <path d="M3.51 15a9 9 0 1 0 .49-3.79" />
               </svg>
-              {syncing ? "Syncing..." : "Sync Shopify"}
+              {syncing ? "Syncing…" : "Sync now"}
             </button>
+            <span style={{ fontSize: "11px", color: "var(--text3)" }}>
+              {syncing ? "Syncing…" : `Last synced: ${formatRelativeTime(lastSyncedAt)}`}
+            </span>
           </div>
         </div>
 

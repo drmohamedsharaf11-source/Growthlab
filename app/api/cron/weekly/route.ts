@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { syncMetaCreatives } from "@/lib/meta";
 import { syncTikTokCreatives } from "@/lib/tiktok";
-import { syncShopifyData } from "@/lib/shopify";
+import { syncShopifyProducts } from "@/lib/syncShopifyProducts";
 import { sendWeeklyReport } from "@/lib/email";
 import { getPeriodDateRange, formatPeriodLabel } from "@/lib/reports";
 
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (client.shopifyDomain && client.shopifyToken) {
-          await syncShopifyData(client.shopifyDomain, client.shopifyToken, dateRange);
+          await syncShopifyProducts(client.id);
         }
 
         const weeklyCreatives = await prisma.creative.findMany({

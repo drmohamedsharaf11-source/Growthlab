@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { encrypt } from "@/lib/encryption";
+import { syncShopifyProducts } from "@/lib/syncShopifyProducts";
 import { Role } from "@prisma/client";
 
 function normalizeShop(raw: string): string {
@@ -121,5 +122,11 @@ export async function POST(request: NextRequest) {
   });
 
   console.log(`[shopify/connect] success — shop=${shop}`);
+
+  // Fire-and-forget initial sync — don't block the response
+  syncShopifyProducts(resolvedClientId).catch((e) =>
+    console.error("[shopify/connect] initial sync failed:", e)
+  );
+
   return NextResponse.json({ success: true, shop });
 }
