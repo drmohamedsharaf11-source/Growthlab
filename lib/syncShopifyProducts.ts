@@ -1,4 +1,6 @@
 import prisma from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { getOrders } from "@/lib/shopify";
 import { getPeriodDateRange } from "@/lib/reports";
 
@@ -212,7 +214,7 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     };
   });
 
-  // Phase 4: load all existing DB records in 2 bulk queries
+  // Phase 4: load existing records in 2 bulk queries
   const [existingProducts, existingVariants] = await Promise.all([
     prisma.product.findMany({
       where: { clientId },
@@ -229,74 +231,94 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     existingVariants.map((v) => [`${v.productId}:${v.shopifyId}`, v])
   );
 
-  const PRODUCT_BATCH = 10;
-  const VARIANT_BATCH = 20;
-  const productTotalBatches = Math.ceil(mapped.length / PRODUCT_BATCH);
+  // Phase 5: bulk upsert products — 1 UPDATE + 1 INSERT (max 2 SQL statements)
+  const dbStart = Date.now();
 
-  // Phase 5: upsert products in batches of 10 via $transaction
-  type ProductResult = { product: { id: string; shopifyId: string }; variants: MappedVariant[] };
-  const productResults: ProductResult[] = [];
+  const toUpdateProducts = mapped.filter(({ shopifyId }) => productIdMap.has(shopifyId));
+  const toInsertProducts = mapped.filter(({ shopifyId }) => !productIdMap.has(shopifyId));
 
-  for (let i = 0; i < mapped.length; i += PRODUCT_BATCH) {
-    const batchNum = Math.floor(i / PRODUCT_BATCH) + 1;
-    const batchStart = Date.now();
-    const batch = mapped.slice(i, i + PRODUCT_BATCH);
+  // Pre-generate IDs for new products so we can build the full map without a RETURNING query
+  const newProductIds = new Map(toInsertProducts.map(({ shopifyId }) => [shopifyId, randomUUID()]));
 
-    const results = await prisma.$transaction(
-      batch.map(({ variants: _v, ...fields }) => {
-        const existingId = productIdMap.get(fields.shopifyId);
-        return existingId
-          ? prisma.product.update({
-              where: { id: existingId },
-              data: { name: fields.name, totalSold: fields.totalSold, revenue: fields.revenue },
-            })
-          : prisma.product.create({ data: { ...fields, clientId } });
-      })
-    );
-
-    console.log(
-      `[sync] products batch ${batchNum}/${productTotalBatches}, ${Date.now() - batchStart}ms`
-    );
-
-    for (let j = 0; j < results.length; j++) {
-      productResults.push({ product: results[j], variants: batch[j].variants });
-    }
+  if (toUpdateProducts.length > 0) {
+    await prisma.$executeRaw`
+      UPDATE "Product" AS p
+      SET    "name"      = v.name,
+             "totalSold" = v.total_sold,
+             "revenue"   = v.revenue
+      FROM  (VALUES ${Prisma.join(
+        toUpdateProducts.map(({ shopifyId, name, totalSold, revenue }) =>
+          Prisma.sql`(${productIdMap.get(shopifyId)!}::text, ${name}::text, ${totalSold}::int, ${revenue}::float8)`
+        )
+      )}) AS v(id, name, total_sold, revenue)
+      WHERE  p.id = v.id
+    `;
   }
 
-  // Phase 6: collect all variant pairs, then upsert in batches of 20
-  type VariantPair = { productId: string; variant: MappedVariant };
-  const allVariantPairs: VariantPair[] = productResults.flatMap(({ product, variants }) =>
-    variants.map((variant) => ({ productId: product.id, variant }))
+  if (toInsertProducts.length > 0) {
+    await prisma.$executeRaw`
+      INSERT INTO "Product" ("id", "clientId", "shopifyId", "name", "totalSold", "revenue")
+      VALUES ${Prisma.join(
+        toInsertProducts.map(({ shopifyId, name, totalSold, revenue }) =>
+          Prisma.sql`(${newProductIds.get(shopifyId)!}, ${clientId}, ${shopifyId}, ${name}, ${totalSold}::int, ${revenue}::float8)`
+        )
+      )}
+    `;
+  }
+
+  console.log(
+    `[sync] products: ${toUpdateProducts.length} updated, ${toInsertProducts.length} inserted in ${Date.now() - dbStart}ms`
   );
 
-  const variantTotalBatches = Math.ceil(allVariantPairs.length / VARIANT_BATCH);
+  // Build complete shopifyId → DB id map (existing + newly inserted)
+  const allProductIdMap = new Map([...Array.from(productIdMap), ...Array.from(newProductIds)]);
 
-  for (let i = 0; i < allVariantPairs.length; i += VARIANT_BATCH) {
-    const batchNum = Math.floor(i / VARIANT_BATCH) + 1;
-    const batchStart = Date.now();
-    const batch = allVariantPairs.slice(i, i + VARIANT_BATCH);
+  // Phase 6: bulk upsert variants — 1 UPDATE + 1 INSERT (max 2 SQL statements)
+  const variantStart = Date.now();
 
-    await prisma.$transaction(
-      batch.map(({ productId, variant }) => {
-        const existing = variantIdMap.get(`${productId}:${variant.shopifyId}`);
-        return existing
-          ? prisma.variant.update({
-              where: { id: existing.id },
-              data: {
-                sold: variant.sold,
-                stockLeft: variant.stockLeft,
-                initialStock: Math.max(existing.initialStock, variant.initialStock),
-                revenue: variant.revenue,
-              },
-            })
-          : prisma.variant.create({ data: { ...variant, productId } });
-      })
-    );
+  type VariantWithProductId = MappedVariant & { productId: string };
+  const allVariants: VariantWithProductId[] = mapped.flatMap(({ shopifyId: productShopifyId, variants }) => {
+    const dbProductId = allProductIdMap.get(productShopifyId)!;
+    return variants.map((v) => ({ ...v, productId: dbProductId }));
+  });
 
-    console.log(
-      `[sync] variants batch ${batchNum}/${variantTotalBatches}, ${Date.now() - batchStart}ms`
-    );
+  const toUpdateVariants = allVariants.filter(
+    ({ productId, shopifyId }) => variantIdMap.has(`${productId}:${shopifyId}`)
+  );
+  const toInsertVariants = allVariants.filter(
+    ({ productId, shopifyId }) => !variantIdMap.has(`${productId}:${shopifyId}`)
+  );
+
+  if (toUpdateVariants.length > 0) {
+    await prisma.$executeRaw`
+      UPDATE "Variant" AS v
+      SET    "sold"         = u.sold,
+             "stockLeft"    = u.stock_left,
+             "initialStock" = GREATEST(v."initialStock", u.initial_stock),
+             "revenue"      = u.revenue
+      FROM  (VALUES ${Prisma.join(
+        toUpdateVariants.map(({ shopifyId, productId, sold, stockLeft, initialStock, revenue }) =>
+          Prisma.sql`(${variantIdMap.get(`${productId}:${shopifyId}`)!.id}::text, ${sold}::int, ${stockLeft}::int, ${initialStock}::int, ${revenue}::float8)`
+        )
+      )}) AS u(id, sold, stock_left, initial_stock, revenue)
+      WHERE  v.id = u.id
+    `;
   }
+
+  if (toInsertVariants.length > 0) {
+    await prisma.$executeRaw`
+      INSERT INTO "Variant" ("id", "productId", "shopifyId", "size", "color", "sold", "stockLeft", "initialStock", "revenue")
+      VALUES ${Prisma.join(
+        toInsertVariants.map(({ shopifyId, productId, size, color, sold, stockLeft, initialStock, revenue }) =>
+          Prisma.sql`(${randomUUID()}, ${productId}, ${shopifyId}, ${size}, ${color}, ${sold}::int, ${stockLeft}::int, ${initialStock}::int, ${revenue}::float8)`
+        )
+      )}
+    `;
+  }
+
+  console.log(
+    `[sync] variants: ${toUpdateVariants.length} updated, ${toInsertVariants.length} inserted in ${Date.now() - variantStart}ms`
+  );
 
   // Stamp sync time
   await prisma.client.update({
