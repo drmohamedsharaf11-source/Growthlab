@@ -305,12 +305,17 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     `;
   }
 
+  // Pre-generate IDs for new variants so we can build a complete lookup map
+  const newVariantIds = new Map(
+    toInsertVariants.map(({ productId, shopifyId }) => [`${productId}:${shopifyId}`, randomUUID()])
+  );
+
   if (toInsertVariants.length > 0) {
     await prisma.$executeRaw`
       INSERT INTO "Variant" ("id", "productId", "shopifyId", "size", "color", "sold", "stockLeft", "initialStock", "revenue")
       VALUES ${Prisma.join(
         toInsertVariants.map(({ shopifyId, productId, size, color, sold, stockLeft, initialStock, revenue }) =>
-          Prisma.sql`(${randomUUID()}, ${productId}, ${shopifyId}, ${size}, ${color}, ${sold}::int, ${stockLeft}::int, ${initialStock}::int, ${revenue}::float8)`
+          Prisma.sql`(${newVariantIds.get(`${productId}:${shopifyId}`)!}, ${productId}, ${shopifyId}, ${size}, ${color}, ${sold}::int, ${stockLeft}::int, ${initialStock}::int, ${revenue}::float8)`
         )
       )}
     `;
@@ -318,6 +323,81 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
 
   console.log(
     `[sync] variants: ${toUpdateVariants.length} updated, ${toInsertVariants.length} inserted in ${Date.now() - variantStart}ms`
+  );
+
+  // Build complete variant lookup map: "dbProductId:variantGid" → db variant id
+  const allVariantIdMap = new Map<string, string>([
+    ...Array.from(variantIdMap, ([k, v]) => [k, v.id] as [string, string]),
+    ...Array.from(newVariantIds),
+  ]);
+
+  // Phase 7: upsert orders + line items
+  const orderStart = Date.now();
+
+  const existingOrders = await prisma.order.findMany({
+    where: { clientId, shopifyId: { in: orders.map((o) => o.id.toString()) } },
+    select: { id: true, shopifyId: true },
+  });
+  const orderIdMap = new Map(existingOrders.map((o) => [o.shopifyId, o.id]));
+
+  const newOrders = orders
+    .filter((o) => !orderIdMap.has(o.id.toString()))
+    .map((o) => ({ id: randomUUID(), shopifyId: o.id.toString(), createdAt: new Date(o.created_at) }));
+
+  if (newOrders.length > 0) {
+    await prisma.$executeRaw`
+      INSERT INTO "Order" ("id", "clientId", "shopifyId", "createdAt")
+      VALUES ${Prisma.join(
+        newOrders.map((o) => Prisma.sql`(${o.id}, ${clientId}, ${o.shopifyId}, ${o.createdAt})`)
+      )}
+      ON CONFLICT ("clientId", "shopifyId") DO NOTHING
+    `;
+    for (const o of newOrders) orderIdMap.set(o.shopifyId, o.id);
+  }
+
+  const allLineItems = orders.flatMap((o) => {
+    const orderId = orderIdMap.get(o.id.toString());
+    if (!orderId) return [];
+    const orderedAt = new Date(o.created_at);
+
+    return o.line_items.map((item) => {
+      const productGid = `gid://shopify/Product/${item.product_id}`;
+      const variantGid = `gid://shopify/ProductVariant/${item.variant_id}`;
+      const dbProductId = allProductIdMap.get(productGid) ?? null;
+      const dbVariantId = dbProductId ? (allVariantIdMap.get(`${dbProductId}:${variantGid}`) ?? null) : null;
+
+      return {
+        id: randomUUID(),
+        orderId,
+        shopifyLineId: item.id.toString(),
+        productId: dbProductId,
+        variantId: dbVariantId,
+        title: item.title,
+        variantTitle: item.variant_title || null,
+        quantity: item.quantity,
+        price: parseFloat(item.price),
+        revenue: parseFloat(item.price) * item.quantity,
+        orderedAt,
+      };
+    });
+  });
+
+  const CHUNK = 500;
+  for (let i = 0; i < allLineItems.length; i += CHUNK) {
+    const chunk = allLineItems.slice(i, i + CHUNK);
+    await prisma.$executeRaw`
+      INSERT INTO "OrderLineItem" ("id", "orderId", "shopifyLineId", "productId", "variantId", "title", "variantTitle", "quantity", "price", "revenue", "orderedAt")
+      VALUES ${Prisma.join(
+        chunk.map((li) =>
+          Prisma.sql`(${li.id}, ${li.orderId}, ${li.shopifyLineId}, ${li.productId}, ${li.variantId}, ${li.title}, ${li.variantTitle}, ${li.quantity}::int, ${li.price}::float8, ${li.revenue}::float8, ${li.orderedAt})`
+        )
+      )}
+      ON CONFLICT ("orderId", "shopifyLineId") DO NOTHING
+    `;
+  }
+
+  console.log(
+    `[sync] orders: ${newOrders.length} new, ${allLineItems.length} line items in ${Date.now() - orderStart}ms`
   );
 
   // Stamp sync time

@@ -38,6 +38,7 @@ model Client {
   status            ClientStatus @default(ACTIVE)
   users             User[]
   products          Product[]
+  orders            Order[]
   adAccounts        AdAccount[]
   alerts            Alert[]
   invites           Invite[]
@@ -73,27 +74,29 @@ model Creative {
 }
 
 model Product {
-  id        String    @id @default(cuid())
+  id        String          @id @default(cuid())
   clientId  String
-  client    Client    @relation(fields: [clientId], references: [id])
+  client    Client          @relation(fields: [clientId], references: [id])
   shopifyId String
   name      String
-  totalSold Int       @default(0)
-  revenue   Float     @default(0)
+  totalSold Int             @default(0)
+  revenue   Float           @default(0)
   variants  Variant[]
+  lineItems OrderLineItem[]
 }
 
 model Variant {
-  id           String  @id @default(cuid())
+  id           String          @id @default(cuid())
   productId    String
-  product      Product @relation(fields: [productId], references: [id])
+  product      Product         @relation(fields: [productId], references: [id])
   shopifyId    String
   size         String?
   color        String?
-  sold         Int     @default(0)
-  stockLeft    Int     @default(0)
-  initialStock Int     @default(0)
-  revenue      Float   @default(0)
+  sold         Int             @default(0)
+  stockLeft    Int             @default(0)
+  initialStock Int             @default(0)
+  revenue      Float           @default(0)
+  lineItems    OrderLineItem[]
 }
 
 model Alert {
@@ -117,6 +120,38 @@ model Invite {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+}
+
+model Order {
+  id        String          @id @default(cuid())
+  clientId  String
+  client    Client          @relation(fields: [clientId], references: [id])
+  shopifyId String
+  createdAt DateTime
+  lineItems OrderLineItem[]
+
+  @@unique([clientId, shopifyId])
+}
+
+model OrderLineItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id])
+  shopifyLineId String
+  productId     String?
+  product       Product? @relation(fields: [productId], references: [id])
+  variantId     String?
+  variant       Variant? @relation(fields: [variantId], references: [id])
+  title         String
+  variantTitle  String?
+  quantity      Int
+  price         Float
+  revenue       Float
+  orderedAt     DateTime
+
+  @@unique([orderId, shopifyLineId])
+  @@index([orderedAt])
+  @@index([productId, orderedAt])
 }
 
 enum Role {
