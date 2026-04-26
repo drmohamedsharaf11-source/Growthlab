@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { synced } = await syncShopifyProducts(clientId);
+    const { synced, elapsed } = await syncShopifyProducts(clientId);
 
     // Re-fetch lastShopifySyncAt to return to the client
     const updated = await prisma.client.findUnique({
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       select: { lastShopifySyncAt: true },
     });
 
-    return NextResponse.json({ success: true, synced, lastShopifySyncAt: updated?.lastShopifySyncAt });
+    return NextResponse.json({ success: true, synced, elapsed, lastShopifySyncAt: updated?.lastShopifySyncAt });
   } catch (error) {
     console.error("Shopify sync error:", error);
     return NextResponse.json(
