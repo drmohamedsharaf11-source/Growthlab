@@ -1,12 +1,10 @@
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { getOrders } from "@/lib/shopify";
-import { getPeriodDateRange } from "@/lib/reports";
 
 const GRAPHQL_VERSION = "2024-10";
 
-// ----- GraphQL types -----
+// ----- GraphQL types: products -----
 
 interface GqlSelectedOption {
   name: string;
@@ -25,7 +23,7 @@ interface GqlProductNode {
   variants: { edges: Array<{ node: GqlVariantNode }> };
 }
 
-interface GqlResponse {
+interface GqlProductsResponse {
   data?: {
     products: {
       edges: Array<{ cursor: string; node: GqlProductNode }>;
@@ -35,7 +33,37 @@ interface GqlResponse {
   errors?: Array<{ message: string }>;
 }
 
-// ----- GraphQL query -----
+// ----- GraphQL types: orders -----
+
+interface GqlLineItemNode {
+  id: string;
+  quantity: number;
+  originalUnitPriceSet: {
+    shopMoney: { amount: string; currencyCode: string };
+  };
+  variant: { id: string } | null;
+  product: { id: string } | null;
+  title: string;
+  variantTitle: string | null;
+}
+
+interface GqlOrderNode {
+  id: string;
+  createdAt: string;
+  lineItems: { edges: Array<{ node: GqlLineItemNode }> };
+}
+
+interface GqlOrdersResponse {
+  data?: {
+    orders: {
+      edges: Array<{ cursor: string; node: GqlOrderNode }>;
+      pageInfo: { hasNextPage: boolean };
+    };
+  };
+  errors?: Array<{ message: string }>;
+}
+
+// ----- GraphQL queries -----
 
 const PRODUCTS_QUERY = `
   query($cursor: String) {
@@ -61,10 +89,63 @@ const PRODUCTS_QUERY = `
   }
 `;
 
-// ----- Fetcher -----
+const ORDERS_QUERY = `
+  query($cursor: String, $q: String!) {
+    orders(first: 250, after: $cursor, query: $q) {
+      edges {
+        cursor
+        node {
+          id
+          createdAt
+          lineItems(first: 250) {
+            edges {
+              node {
+                id
+                quantity
+                originalUnitPriceSet {
+                  shopMoney { amount currencyCode }
+                }
+                variant { id }
+                product { id }
+                title
+                variantTitle
+              }
+            }
+          }
+        }
+      }
+      pageInfo { hasNextPage }
+    }
+  }
+`;
+
+// ----- Shared GraphQL fetcher -----
+
+async function gqlFetch(domain: string, token: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const url = `https://${domain}/admin/api/${GRAPHQL_VERSION}/graphql.json`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": token,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`Shopify GraphQL auth failed (${res.status}) — token may be expired or missing scopes`);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Shopify GraphQL ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  return res.json();
+}
+
+// ----- Fetchers -----
 
 async function fetchAllProductsGql(domain: string, token: string): Promise<GqlProductNode[]> {
-  const url = `https://${domain}/admin/api/${GRAPHQL_VERSION}/graphql.json`;
   const allProducts: GqlProductNode[] = [];
   let cursor: string | null = null;
   let page = 0;
@@ -72,35 +153,16 @@ async function fetchAllProductsGql(domain: string, token: string): Promise<GqlPr
 
   while (true) {
     page++;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": token,
-      },
-      body: JSON.stringify({ query: PRODUCTS_QUERY, variables: { cursor } }),
-    });
-
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(`Shopify GraphQL auth failed (${res.status}) — token may be expired or missing scopes`);
-    }
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Shopify GraphQL ${res.status}: ${text.slice(0, 200)}`);
-    }
-
-    const json: GqlResponse = await res.json();
+    const json = await gqlFetch(domain, token, PRODUCTS_QUERY, { cursor }) as GqlProductsResponse;
 
     if (json.errors?.length) {
-      console.error("[sync/graphql] GraphQL errors:", json.errors);
       throw new Error(`GraphQL errors: ${json.errors.map((e) => e.message).join(", ")}`);
     }
 
     const edges = json.data?.products.edges ?? [];
     for (const { node } of edges) allProducts.push(node);
 
-    console.log(`[sync/graphql] page ${page}, ${allProducts.length} products so far, ${Date.now() - start}ms`);
+    console.log(`[sync/products] page ${page}, ${allProducts.length} products so far, ${Date.now() - start}ms`);
 
     if (!json.data?.products.pageInfo.hasNextPage || edges.length === 0) break;
     cursor = edges[edges.length - 1].cursor;
@@ -109,11 +171,31 @@ async function fetchAllProductsGql(domain: string, token: string): Promise<GqlPr
   return allProducts;
 }
 
-// ----- Helpers -----
+async function fetchAllOrdersGql(domain: string, token: string, sinceDate: string): Promise<GqlOrderNode[]> {
+  const allOrders: GqlOrderNode[] = [];
+  let cursor: string | null = null;
+  let page = 0;
+  const start = Date.now();
+  const q = `created_at:>="${sinceDate}" financial_status:paid`;
 
-// "gid://shopify/Product/123" → "123"
-function gidToNumeric(gid: string): string {
-  return gid.split("/").pop() ?? gid;
+  while (true) {
+    page++;
+    const json = await gqlFetch(domain, token, ORDERS_QUERY, { cursor, q }) as GqlOrdersResponse;
+
+    if (json.errors?.length) {
+      throw new Error(`GraphQL errors: ${json.errors.map((e) => e.message).join(", ")}`);
+    }
+
+    const edges = json.data?.orders.edges ?? [];
+    for (const { node } of edges) allOrders.push(node);
+
+    console.log(`[sync/orders] page ${page}, ${allOrders.length} orders so far, ${Date.now() - start}ms`);
+
+    if (!json.data?.orders.pageInfo.hasNextPage || edges.length === 0) break;
+    cursor = edges[edges.length - 1].cursor;
+  }
+
+  return allOrders;
 }
 
 // ----- Main export -----
@@ -126,45 +208,56 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     throw new Error("Shopify not configured for this client");
   }
 
-  const { shopifyDomain: domain, shopifyToken: token } = client;
-  const dateRange = getPeriodDateRange("MONTHLY");
+  const { shopifyDomain: domain, shopifyToken: token, lastShopifySyncAt } = client;
 
-  // Phase 1: fetch products (GraphQL) + orders (REST) in parallel
-  const [gqlProducts, orders] = await Promise.all([
+  // First sync → go back to Jan 1 2025; subsequent → fetch only new orders
+  const sinceDate = lastShopifySyncAt
+    ? lastShopifySyncAt.toISOString().split("T")[0]
+    : "2025-01-01";
+
+  console.log(`[sync/shopify] client=${clientId} sinceDate=${sinceDate}`);
+
+  // Phase 1: fetch products (GraphQL) + orders (GraphQL, paginated) in parallel
+  const [gqlProducts, gqlOrders] = await Promise.all([
     fetchAllProductsGql(domain, token),
-    getOrders(domain, token, dateRange),
+    fetchAllOrdersGql(domain, token, sinceDate),
   ]);
 
+  const totalLineItems = gqlOrders.reduce((s, o) => s + o.lineItems.edges.length, 0);
   console.log(
-    `[sync/graphql] fetched ${gqlProducts.length} products + ${orders.length} orders in ${Date.now() - start}ms`
+    `[sync/orders] total: ${gqlOrders.length} orders, ${totalLineItems} line items in ${Date.now() - start}ms`
   );
 
-  // Phase 2: build sales maps from orders (keyed by numeric Shopify ID)
+  // Phase 2: build sales maps from orders (keyed by Shopify GID — matches GQL product IDs directly)
   const salesMap = new Map<string, {
     sold: number;
     revenue: number;
     variants: Map<string, { sold: number; revenue: number }>;
   }>();
 
-  for (const order of orders) {
-    for (const item of order.line_items) {
-      const pId = item.product_id.toString();
-      const vId = item.variant_id.toString();
-      const rev = parseFloat(item.price) * item.quantity;
+  for (const order of gqlOrders) {
+    for (const { node: item } of order.lineItems.edges) {
+      if (!item.product?.id) continue; // skip gift cards / custom line items
+      const pGid = item.product.id;
+      const vGid = item.variant?.id ?? null;
+      const price = parseFloat(item.originalUnitPriceSet.shopMoney.amount);
+      const rev = price * item.quantity;
 
-      if (!salesMap.has(pId)) salesMap.set(pId, { sold: 0, revenue: 0, variants: new Map() });
-      const pd = salesMap.get(pId)!;
+      if (!salesMap.has(pGid)) salesMap.set(pGid, { sold: 0, revenue: 0, variants: new Map() });
+      const pd = salesMap.get(pGid)!;
       pd.sold += item.quantity;
       pd.revenue += rev;
 
-      if (!pd.variants.has(vId)) pd.variants.set(vId, { sold: 0, revenue: 0 });
-      const vd = pd.variants.get(vId)!;
-      vd.sold += item.quantity;
-      vd.revenue += rev;
+      if (vGid) {
+        if (!pd.variants.has(vGid)) pd.variants.set(vGid, { sold: 0, revenue: 0 });
+        const vd = pd.variants.get(vGid)!;
+        vd.sold += item.quantity;
+        vd.revenue += rev;
+      }
     }
   }
 
-  // Phase 3: map GQL nodes to our internal shape
+  // Phase 3: map GQL product nodes to our internal shape
   type MappedVariant = {
     shopifyId: string;
     size: string | null;
@@ -183,8 +276,8 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
   };
 
   const mapped: MappedProduct[] = gqlProducts.map((p) => {
-    const numPid = gidToNumeric(p.id);
-    const ps = salesMap.get(numPid);
+    // p.id is already a GID — direct lookup in salesMap, no conversion needed
+    const ps = salesMap.get(p.id);
 
     return {
       shopifyId: p.id,
@@ -192,12 +285,10 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
       totalSold: ps?.sold ?? 0,
       revenue: ps?.revenue ?? 0,
       variants: p.variants.edges.map(({ node: v }) => {
-        const numVid = gidToNumeric(v.id);
-        const vs = ps?.variants.get(numVid);
+        const vs = ps?.variants.get(v.id); // v.id is also a GID
         const stockLeft = Math.max(0, v.inventoryQuantity ?? 0);
         const sold = vs?.sold ?? 0;
 
-        // selectedOptions[0] = Size/first option, [1] = Color/second option
         const opts = v.selectedOptions;
         const isDefault = opts.length === 1 && opts[0].value === "Default Title";
 
@@ -231,26 +322,26 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     existingVariants.map((v) => [`${v.productId}:${v.shopifyId}`, v])
   );
 
-  // Phase 5: bulk upsert products — 1 UPDATE + 1 INSERT (max 2 SQL statements)
+  // Phase 5: bulk upsert products
   const dbStart = Date.now();
 
   const toUpdateProducts = mapped.filter(({ shopifyId }) => productIdMap.has(shopifyId));
   const toInsertProducts = mapped.filter(({ shopifyId }) => !productIdMap.has(shopifyId));
 
-  // Pre-generate IDs for new products so we can build the full map without a RETURNING query
   const newProductIds = new Map(toInsertProducts.map(({ shopifyId }) => [shopifyId, randomUUID()]));
 
   if (toUpdateProducts.length > 0) {
+    // Incremental: ADD new sold/revenue from this sync window on top of existing totals
     await prisma.$executeRaw`
       UPDATE "Product" AS p
       SET    "name"      = v.name,
-             "totalSold" = v.total_sold,
-             "revenue"   = v.revenue
+             "totalSold" = p."totalSold" + v.additional_sold,
+             "revenue"   = p."revenue" + v.additional_revenue
       FROM  (VALUES ${Prisma.join(
         toUpdateProducts.map(({ shopifyId, name, totalSold, revenue }) =>
           Prisma.sql`(${productIdMap.get(shopifyId)!}::text, ${name}::text, ${totalSold}::int, ${revenue}::float8)`
         )
-      )}) AS v(id, name, total_sold, revenue)
+      )}) AS v(id, name, additional_sold, additional_revenue)
       WHERE  p.id = v.id
     `;
   }
@@ -270,10 +361,9 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     `[sync] products: ${toUpdateProducts.length} updated, ${toInsertProducts.length} inserted in ${Date.now() - dbStart}ms`
   );
 
-  // Build complete shopifyId → DB id map (existing + newly inserted)
   const allProductIdMap = new Map([...Array.from(productIdMap), ...Array.from(newProductIds)]);
 
-  // Phase 6: bulk upsert variants — 1 UPDATE + 1 INSERT (max 2 SQL statements)
+  // Phase 6: bulk upsert variants
   const variantStart = Date.now();
 
   type VariantWithProductId = MappedVariant & { productId: string };
@@ -290,22 +380,22 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
   );
 
   if (toUpdateVariants.length > 0) {
+    // Incremental: ADD new sold/revenue; stockLeft/initialStock always reflect current inventory
     await prisma.$executeRaw`
       UPDATE "Variant" AS v
-      SET    "sold"         = u.sold,
+      SET    "sold"         = v."sold" + u.additional_sold,
              "stockLeft"    = u.stock_left,
              "initialStock" = GREATEST(v."initialStock", u.initial_stock),
-             "revenue"      = u.revenue
+             "revenue"      = v."revenue" + u.additional_revenue
       FROM  (VALUES ${Prisma.join(
         toUpdateVariants.map(({ shopifyId, productId, sold, stockLeft, initialStock, revenue }) =>
           Prisma.sql`(${variantIdMap.get(`${productId}:${shopifyId}`)!.id}::text, ${sold}::int, ${stockLeft}::int, ${initialStock}::int, ${revenue}::float8)`
         )
-      )}) AS u(id, sold, stock_left, initial_stock, revenue)
+      )}) AS u(id, additional_sold, stock_left, initial_stock, additional_revenue)
       WHERE  v.id = u.id
     `;
   }
 
-  // Pre-generate IDs for new variants so we can build a complete lookup map
   const newVariantIds = new Map(
     toInsertVariants.map(({ productId, shopifyId }) => [`${productId}:${shopifyId}`, randomUUID()])
   );
@@ -325,7 +415,6 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
     `[sync] variants: ${toUpdateVariants.length} updated, ${toInsertVariants.length} inserted in ${Date.now() - variantStart}ms`
   );
 
-  // Build complete variant lookup map: "dbProductId:variantGid" → db variant id
   const allVariantIdMap = new Map<string, string>([
     ...Array.from(variantIdMap, ([k, v]) => [k, v.id] as [string, string]),
     ...Array.from(newVariantIds),
@@ -334,49 +423,48 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
   // Phase 7: upsert orders + line items
   const orderStart = Date.now();
 
-  const existingOrders = await prisma.order.findMany({
-    where: { clientId, shopifyId: { in: orders.map((o) => o.id.toString()) } },
-    select: { id: true, shopifyId: true },
-  });
-  const orderIdMap = new Map(existingOrders.map((o) => [o.shopifyId, o.id]));
+  // Insert all orders; DO UPDATE (no-op) so RETURNING gives us IDs for both new and existing rows
+  type OrderRow = { id: string; shopifyId: string };
+  let orderIdMap = new Map<string, string>();
 
-  const newOrders = orders
-    .filter((o) => !orderIdMap.has(o.id.toString()))
-    .map((o) => ({ id: randomUUID(), shopifyId: o.id.toString(), createdAt: new Date(o.created_at) }));
-
-  if (newOrders.length > 0) {
-    await prisma.$executeRaw`
+  if (gqlOrders.length > 0) {
+    const orderRows: OrderRow[] = await prisma.$queryRaw`
       INSERT INTO "Order" ("id", "clientId", "shopifyId", "createdAt")
       VALUES ${Prisma.join(
-        newOrders.map((o) => Prisma.sql`(${o.id}, ${clientId}, ${o.shopifyId}, ${o.createdAt})`)
+        gqlOrders.map((o) =>
+          Prisma.sql`(${randomUUID()}, ${clientId}, ${o.id}, ${new Date(o.createdAt)})`
+        )
       )}
-      ON CONFLICT ("clientId", "shopifyId") DO NOTHING
+      ON CONFLICT ("clientId", "shopifyId") DO UPDATE
+        SET "createdAt" = "Order"."createdAt"
+      RETURNING id, "shopifyId"
     `;
-    for (const o of newOrders) orderIdMap.set(o.shopifyId, o.id);
+    orderIdMap = new Map(orderRows.map((r) => [r.shopifyId, r.id]));
   }
 
-  const allLineItems = orders.flatMap((o) => {
-    const orderId = orderIdMap.get(o.id.toString());
+  const allLineItems = gqlOrders.flatMap((o) => {
+    const orderId = orderIdMap.get(o.id);
     if (!orderId) return [];
-    const orderedAt = new Date(o.created_at);
+    const orderedAt = new Date(o.createdAt);
 
-    return o.line_items.map((item) => {
-      const productGid = `gid://shopify/Product/${item.product_id}`;
-      const variantGid = `gid://shopify/ProductVariant/${item.variant_id}`;
-      const dbProductId = allProductIdMap.get(productGid) ?? null;
-      const dbVariantId = dbProductId ? (allVariantIdMap.get(`${dbProductId}:${variantGid}`) ?? null) : null;
+    return o.lineItems.edges.map(({ node: item }) => {
+      const dbProductId = item.product?.id ? (allProductIdMap.get(item.product.id) ?? null) : null;
+      const dbVariantId = (dbProductId && item.variant?.id)
+        ? (allVariantIdMap.get(`${dbProductId}:${item.variant.id}`) ?? null)
+        : null;
+      const price = parseFloat(item.originalUnitPriceSet.shopMoney.amount);
 
       return {
         id: randomUUID(),
         orderId,
-        shopifyLineId: item.id.toString(),
+        shopifyLineId: item.id,
         productId: dbProductId,
         variantId: dbVariantId,
         title: item.title,
-        variantTitle: item.variant_title || null,
+        variantTitle: item.variantTitle ?? null,
         quantity: item.quantity,
-        price: parseFloat(item.price),
-        revenue: parseFloat(item.price) * item.quantity,
+        price,
+        revenue: price * item.quantity,
         orderedAt,
       };
     });
@@ -397,7 +485,7 @@ export async function syncShopifyProducts(clientId: string): Promise<{ synced: n
   }
 
   console.log(
-    `[sync] orders: ${newOrders.length} new, ${allLineItems.length} line items in ${Date.now() - orderStart}ms`
+    `[sync] orders: ${gqlOrders.length} upserted, ${allLineItems.length} line items in ${Date.now() - orderStart}ms`
   );
 
   // Stamp sync time
